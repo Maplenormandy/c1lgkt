@@ -28,7 +28,9 @@ import matplotlib.tri as tri
 class BallooningModeInterpolator(Protocol):
     """
     A protocol for a function that returns the ballooning mode structure at a given flux coordinate.
-    Represents something like f_n(q,eta) type functions
+    Represents something like f_n(q,eta) type functions.
+
+    TODO: Think about how to implement gyro-averaging
     """
     def __call__(self, q: np.ndarray, eta: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -367,6 +369,10 @@ class XgcLinearFieldHandler(XgcFieldHandler):
 
 # %% Field handler from Gauss-Hermite coefficients
 
+# Normalization coefficients for Gauss-Hermite functions
+n1 = np.sqrt(2)
+n2 = np.sqrt(8)
+
 class GaussHermiteFunction(BallooningModeInterpolator):
     """
     A class that wraps an evaluation for Gauss-Hermite functions
@@ -376,24 +382,35 @@ class GaussHermiteFunction(BallooningModeInterpolator):
         Set up a GaussHermiteFunction with given params and coefs.
 
         params is a numpy array of [mu_q, mu_eta, sigma_q, sigma_eta]
-        coefs is a numpy array of the Gauss-Hermite coefficients, compatible
-        with np.polynomial.hermite.hermval2d. Note these are for the unnormalized
-        physicist's Hermite polynomials.
+        coefs is a numpy array of the Gauss-Hermite coefficients, with order (0,0), (1,0), (0,1), (2,0), (1,1), (0,2), etc.
 
         Internally, coefs will be converted to also compute gradients
         """
 
         # Store the parameters
         self.params = params
+        # Store the coefficients as complex values
+        if np.iscomplexobj(coefs):
+            self.coefs = coefs
+        else:
+            self.coefs = coefs[::2] + 1j*coefs[1::2]
         
+        # Old code: uses np.polynomial.hermite.hermval2d, which may be slow
+        '''
         # Compute derivatives of the Hermite coefficients
         dcoefs0 = np.polynomial.hermite.hermder(coefs, axis=0)
         dcoefs1 = np.polynomial.hermite.hermder(coefs, axis=1)
 
-        # Stack the coefficients together on the last axis
-        self.coefs = np.stack((coefs, dcoefs0, dcoefs1), axis=-1)
+        if dcoefs0.shape[0] != coefs.shape[0]:
+            dcoefs0 = np.concatenate((dcoefs0, np.zeros((1, coefs.shape[1]))), axis=0)
+        if dcoefs1.shape[1] != coefs.shape[1]:
+            dcoefs1 = np.concatenate((dcoefs1, np.zeros((coefs.shape[0], 1))), axis=1)
 
-    def __call__(self, q, eta):
+        # Stack the coefficients together on the last axis
+        self.coefs = np.stack((coefs, dcoefs0, dcoefs1), axis=-1)'
+        '''
+
+    def __call__(self, q, eta, gradient=True):
         mu_q, mu_eta, sigma_q, sigma_eta = self.params
         c = self.coefs
 
@@ -401,17 +418,33 @@ class GaussHermiteFunction(BallooningModeInterpolator):
         z_q = (q - mu_q) / sigma_q
         z_eta = (eta - mu_eta) / sigma_eta
 
-        ## Compute the Hermite polynomial parts and Gaussian prefactor
-        p = np.polynomial.hermite.hermval2d(z_q, z_eta, c)
+        ## Compute Gaussian prefactor
         g = np.exp(-0.5*(z_q**2 + z_eta**2))
 
-        ## Compute the function and its derivatives
-        f = p[0,:]*g
-        f_q = (p[1,:] - z_q*p[0,:]) * g / sigma_q
-        f_eta = (p[2,:] - z_eta*p[0,:]) * g / sigma_eta
+        ## Start computing Hermite polynomials.
+        p = c[0]*np.ones(z_q.shape, dtype=complex)
 
-        # Return as a tuple of f and its derivatives
-        return (f, f_q, f_eta)
+        if len(c) > 1:
+            p += (c[1] * z_q + c[2] * z_eta)/n1
+        if len(c) > 3:
+            p += (c[3] * (4*z_q**2 - 2) + c[5] * (4*z_eta**2 - 2)) / n2 + (c[4] * z_q * z_eta) / n1**2
+        
+        if gradient:
+            p_q = np.zeros_like(p)
+            p_eta = np.zeros_like(p)
+
+            if len(c) > 1:
+                p_q += c[1] / n1
+                p_eta += c[2] / n1
+            if len(c) > 3:
+                p_q += c[3] * 8 * z_q / n2 + c[4] * z_eta / n1**2
+                p_eta += c[5] * 8 * z_eta / n2 + c[4] * z_q / n1**2
+
+        ## Compute the function and its derivatives
+        if gradient:
+            return (p*g, (p_q - z_q*p) * g/sigma_q, (p_eta - z_eta*p) * g/sigma_eta)
+        else:
+            return p * g
 
 
 class GaussHermiteFieldHandler(FieldHandler):

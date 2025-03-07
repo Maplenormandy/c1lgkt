@@ -1,3 +1,8 @@
+# User-defined values
+outputs/
+.vscode/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

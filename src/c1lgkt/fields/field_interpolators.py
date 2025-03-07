@@ -26,11 +26,11 @@ def sum_balloon_mode(q, theta, l_max: int, ntor: int, mode: BallooningModeInterp
     Otherwise, returns the value of phi_n.
     """
     if gradient:
-        dphi = np.zeros((3,)+q.shape)
+        dphi = np.zeros((3,)+q.shape, dtype=complex)
 
         for l in range(-l_max, l_max+1):
             eta = theta + 2*np.pi*l
-            f, f_q, f_eta = mode(q, eta)
+            f, f_q, f_eta = mode(q, eta, gradient=True)
             eik = np.exp(-1j*ntor*q*eta)
 
             dphi[0,:] = (f_q - 1j*ntor*eta*f) * eik
@@ -39,11 +39,11 @@ def sum_balloon_mode(q, theta, l_max: int, ntor: int, mode: BallooningModeInterp
 
         return dphi
     else:
-        phi = np.zeros_like(q)
+        phi = np.zeros(q.shape, dtype=complex)
 
         for l in range(-l_max, l_max+1):
             eta = theta + 2*np.pi*l
-            f, f_q, f_eta = mode(q, eta)
+            f = mode(q, eta, gradient=False)
             phi += f * np.exp(-1j*ntor*q*eta)
     
         return phi
