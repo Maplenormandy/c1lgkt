@@ -23,6 +23,7 @@ from .equilibrium import Equilibrium
 from typing import Literal, NamedTuple
 
 from .utility import periodify, refine_max_position
+from .bicubic_interpolators import BicubicInterpolator
 
 # %% Memoized version of minE DOF estimator
 
@@ -382,6 +383,7 @@ class XgcGeomHandler:
         self.theta_surf = [None] * self.nsurf
         # Geometric theta, also useful for interpolation
         self.gtheta_surf = [None] * self.nsurf
+        self.gdtheta_surf = [None] * self.nsurf
 
         for k in range(self.nsurf):
             # Simplify notation for indexing into the array of nodes
@@ -459,13 +461,34 @@ class XgcGeomHandler:
             #self.dtheta_surf[k] = integrand_edge / q_surf[k]
             self.theta_surf[k] = periodify(self.theta_node[surfslice])
             self.gtheta_surf[k] = periodify(gtheta)
+            self.gdtheta_surf[k] = self.theta_surf[k] - self.gtheta_surf[k]
 
         ## Set up interpolation functions
         dr = self.diff_r @ self.gdtheta_node
         dz = self.diff_z @ self.gdtheta_node
-        self.interp_gdtheta = CubicTriInterpolatorMemoized(self.rz_tri, self.gdtheta_node, kind='min_E', dz=(dr,dz))
-        self.interp_gdtheta_fast = tri.LinearTriInterpolator(self.rz_tri, self.gdtheta_node)
+        self.interp_gdtheta_mesh = CubicTriInterpolatorMemoized(self.rz_tri, self.gdtheta_node, kind='min_E', dz=(dr,dz))
+        self.interp_gdtheta_mesh_linear = tri.LinearTriInterpolator(self.rz_tri, self.gdtheta_node)
         self.interp_q = scipy.interpolate.CubicSpline(self.psi_surf, self.q_surf)
+
+        # Set up grids for Bicubic interpolation
+        ksurf0, ksurf1 = 1, 240
+        self.theta_samp = np.linspace(-np.pi, np.pi, 1024, endpoint=False)
+        self.psi_samp = np.linspace(self.psi_surf[ksurf0], self.psi_surf[ksurf1], 512, endpoint=True)
+
+        # First, resample theta on each flux surface to a regular grid
+        gdtheta_samp = np.empty((ksurf1-ksurf0, len(self.theta_samp)))
+        for k in range(ksurf0, ksurf1):
+            interp_gdtheta = scipy.interpolate.CubicSpline(self.gtheta_surf[k], self.gdtheta_surf[k], bc_type='periodic')
+            gdtheta_samp[k-ksurf0,:] = interp_gdtheta(self.theta_samp)
+        
+        # Then, resample psi on a regular grid
+        self.gdtheta_grid = np.empty((len(self.psi_samp), len(self.theta_samp)))
+        for j in range(len(self.theta_samp)):
+            interp_gdtheta = scipy.interpolate.CubicSpline(self.psi_surf[ksurf0:ksurf1], gdtheta_samp[:,j], bc_type='natural')
+            self.gdtheta_grid[:,j] = interp_gdtheta(self.psi_samp)
+
+        # Set up the interpolator
+        self.interp_gdtheta_grid = BicubicInterpolator(self.gdtheta_grid, ([self.psi_samp[0], self.psi_samp[-1]], [-np.pi, np.pi]), bc_type=['natural', 'periodic'])
 
         # Save the theta mode
         self.theta0_mode = theta0_mode
@@ -475,7 +498,7 @@ class XgcGeomHandler:
         Convenience function for computing psi and the straight field-line theta for
         given coordinates r, z.
         """
-        gdtheta = self.interp_gdtheta(r, z)
+        gdtheta = self.interp_gdtheta_mesh(r, z)
         gtheta = np.arctan2(z - self.zaxis, r - self.raxis)
         theta = gtheta + gdtheta
 

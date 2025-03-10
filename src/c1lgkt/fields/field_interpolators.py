@@ -11,11 +11,17 @@ import scipy.integrate
 
 from .equilibrium import Equilibrium
 from .field_handlers import FieldHandler, RotatingFrameInfo, MeshInterpBundle, BallooningInterpBundle, BallooningModeInterpolator
+from .geometry_handlers import XgcGeomHandler
 
 
 # %% Functions for computing ballooning interpolations
 
-def sum_balloon_mode(q, theta, l_max: int, ntor: int, mode: BallooningModeInterpolator, gradient: bool = True):
+def sum_balloon_mode(
+        q, theta,
+        l_max: int, ntor: int,
+        mode: BallooningModeInterpolator,
+        gradient: bool = True
+        ):
     """
     Takes the ballooning mode interpolator and evaluates the Poisson summation
     with the eikonal to return phi_n(q, theta) in the original domain
@@ -48,6 +54,44 @@ def sum_balloon_mode(q, theta, l_max: int, ntor: int, mode: BallooningModeInterp
     
         return phi
 
+def compute_balloon_interpolation(
+        tfrac, r, z, varphi,
+        psi_ev,
+        eq: Equilibrium,
+        geom: XgcGeomHandler,
+        interp_balloon: list[BallooningInterpBundle],
+        gradient: bool = True
+        ):
+    ## Unpack some parameters
+    nump = len(r)
+    (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
+
+    # Compute q, theta
+    q = geom.interp_q(psi)
+    dqdpsi = geom.interp_q(psi, nu=1)
+    gtheta = np.arctan2(z - eq.zaxis, r - eq.raxis)
+    gdtheta, dgdtheta = geom.interp_gdtheta_grid(psi, gtheta, nu=(0,1))
+
+    if gradient:
+        dphi = np.zeros((3, nump))
+        
+        return dphi
+    else:
+        phi = np.zeros(nump)
+        # Sum up the ballooning modes
+        for bundle in interp_balloon[0]:
+            ntor, mode = bundle
+            tor_eik = np.exp(1j*ntor*varphi)
+            phi += 2*np.real(sum_balloon_mode(q, gtheta+gdtheta, 1, ntor, mode, gradient=False) * (1.0-tfrac) * tor_eik)
+
+        # If we need to do temporal interpolation, do that too
+        if tfrac > 0.0:
+            for bundle in interp_balloon[1]:
+                ntor, mode = bundle
+                tor_eik = np.exp(1j*ntor*varphi)
+                phi += 2*np.real(sum_balloon_mode(q, gtheta+gdtheta, 1, ntor, mode, gradient=False) * tfrac * tor_eik)
+        
+        return phi
 
 # %% Functions for computing poloidal punctures, used for computing interpolation on the mesh
 
@@ -317,7 +361,15 @@ def compute_mesh_interpolation(tfrac, r, z, varphi, psi_ev, eq: Equilibrium, int
 
         return phi_sorted[kphir_invargsort]
 
-def compute_fields(t, r, z, varphi, psi_ev, eq: Equilibrium, fields: FieldHandler, frame: RotatingFrameInfo | None, gradient: bool = True):
+def compute_fields(
+        t, r, z, varphi,
+        psi_ev,
+        eq: Equilibrium,
+        geom: XgcGeomHandler,
+        fields: FieldHandler,
+        frame: RotatingFrameInfo | None,
+        gradient: bool = True
+        ):
     # Unpack some parameters
     nump = len(r)
     (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
@@ -347,6 +399,8 @@ def compute_fields(t, r, z, varphi, psi_ev, eq: Equilibrium, fields: FieldHandle
         ## If the non-zonal component of the potential is specified, we need to do some interpolation
         if interp0.mesh is not None:
             dphi = compute_mesh_interpolation(tfrac, r, z, varphi, psi_ev, eq, interp_mesh)
+        elif interp0.balloon is not None:
+            dphi = compute_balloon_interpolation(tfrac, r, z, varphi, psi_ev, eq, geom, interp_balloon)
         else:
             # If the non-zonal fields are not specified, initialize the fields with zeros
             dphi = np.zeros((3,nump))
@@ -365,6 +419,8 @@ def compute_fields(t, r, z, varphi, psi_ev, eq: Equilibrium, fields: FieldHandle
         ## If the non-zonal component of the potential is specified, we need to do some interpolation
         if interp0.mesh is not None:
             phi = compute_mesh_interpolation(tfrac, r, z, varphi, psi_ev, eq, interp_mesh, gradient=False)
+        elif interp0.balloon is not None:
+            phi = compute_balloon_interpolation(tfrac, r, z, varphi, psi_ev, eq, geom, interp_balloon, gradient=False)
         else:
             # If the non-zonal fields are not specified, initialize the fields with zeros
             phi = np.zeros(nump)

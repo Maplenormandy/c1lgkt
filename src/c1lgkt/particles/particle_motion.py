@@ -194,21 +194,3 @@ def f_kinetic(t, y, eq: Equilibrium, pp: ParticleParams, fields: ZonalFieldHandl
     dy[5] = pp.z*(vxB[2] - dphi*psidz)/pp.m
     
     return dy
-
-
-
-
-"""
-# %% Run tests 
-
-eq = Equilibrium.from_gfile('../input_data/g174819.03560')
-#eq.setup_phi_from_pfile('../input_data/p174819.03560')
-
-sol = scipy.integrate.solve_ivp(f_fieldline, [0, 100], [2.2, 0, 0], atol=1e-8, rtol=1e-8, args=(eq,))
-
-plt.figure()
-ax = plt.subplot(111)
-
-eq.plot_magnetic_geometry(ax)
-plt.plot(sol.y[0,:], sol.y[2,:])
-"""
