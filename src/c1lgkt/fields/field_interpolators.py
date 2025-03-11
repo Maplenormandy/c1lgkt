@@ -28,7 +28,7 @@ def sum_balloon_mode(
 
     l_max is the maximum index to include in the poisson summation
 
-    If in gradient mode, returns the grad(q), grad(zeta), grad(theta) components of phi_n.
+    If in gradient mode, returns the grad(q), grad(zeta), grad(theta) components of grad(phi_n).
     Otherwise, returns the value of phi_n.
     """
     if gradient:
@@ -39,9 +39,9 @@ def sum_balloon_mode(
             f, f_q, f_eta = mode(q, eta, gradient=True)
             eik = np.exp(-1j*ntor*q*eta)
 
-            dphi[0,:] = (f_q - 1j*ntor*eta*f) * eik
-            dphi[1,:] = 1j*ntor*f * eik
-            dphi[2,:] = (f_eta - 1j*ntor*q*f) * eik
+            dphi[0,:] += (f_q - 1j*ntor*eta*f) * eik
+            dphi[1,:] += 1j*ntor*f * eik
+            dphi[2,:] += (f_eta - 1j*ntor*q*f) * eik
 
         return dphi
     else:
@@ -66,30 +66,81 @@ def compute_balloon_interpolation(
     nump = len(r)
     (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
 
-    # Compute q, theta
+    # Compute q, and geometric theta
     q = geom.interp_q(psi)
-    dqdpsi = geom.interp_q(psi, nu=1)
     gtheta = np.arctan2(z - eq.zaxis, r - eq.raxis)
-    gdtheta, dgdtheta = geom.interp_gdtheta_grid(psi, gtheta, nu=(0,1))
+    
 
     if gradient:
-        dphi = np.zeros((3, nump))
+        # Compute straight field line theta from the gradient
+        gdtheta, dgdtheta = geom.interp_gdtheta_grid(psi, gtheta, nu=(0,1))
+        theta = gtheta + gdtheta
+
+        # dq/dpsi
+        dq = geom.interp_q(psi, nu=1)
         
-        return dphi
-    else:
-        phi = np.zeros(nump)
+        # Storage for grad(phi)
+        dphi_b = np.zeros((3, nump))
+
         # Sum up the ballooning modes
         for bundle in interp_balloon[0]:
             ntor, mode = bundle
             tor_eik = np.exp(1j*ntor*varphi)
-            phi += 2*np.real(sum_balloon_mode(q, gtheta+gdtheta, 1, ntor, mode, gradient=False) * (1.0-tfrac) * tor_eik)
+            dphi_b += 2*np.real(sum_balloon_mode(q, theta, 1, ntor, mode) * (1.0-tfrac) * tor_eik)
+        
+        # If we need to do temporal interpolation, do that too
+        if tfrac > 0.0:
+            for bundle in interp_balloon[1]:
+                ntor, mode = bundle
+                tor_eik = np.exp(1j*ntor*varphi)
+                dphi_b += 2*np.real(sum_balloon_mode(q, theta, 1, ntor, mode) * tfrac * tor_eik)
+
+        ## Convert dphi_b into the proper coordinate system
+
+        # Right now, dphi_b has the components phi_q grad(q), phi_zeta grad(zeta), and phi_eta grad(eta)
+        # We need to convert this into phi_R \vu{R}, phi_varphi \vu{varphi}, and phi_Z \vu{Z}
+        dphi = np.empty((3, nump))
+
+        # grad(zeta) = \vu{varphi} / R
+        dphi[1,:] = dphi_b[1,:] / r
+
+        # grad(q) = dq/dpsi (psi_R \vu{R} + \psi_R \vu{Z})
+        # grad(theta_g) = (R-R0) / rg^2 \vu{Z} - (Z-Z0) / rg^2 \vu{R}
+        # grad(eta) = (1 + \delta_theta) grad(theta_g) + \delta_psi grad(psi)
+
+        # rg2 = geometric minor radius squared
+        rg2 = (r - eq.raxis)**2 + (z - eq.zaxis)**2
+
+        # Compute grad(eta)
+        thetagr = (eq.zaxis - z) / rg2
+        thetagz = (r - eq.raxis) / rg2
+        etar = (1 + dgdtheta[1,:]) * thetagr + dgdtheta[0,:] * psidr
+        etaz = (1 + dgdtheta[1,:]) * thetagz + dgdtheta[0,:] * psidz
+
+        dphi[0,:] = dphi_b[0,:] * dq * psidr + dphi_b[2,:] * etar
+        dphi[2,:] = dphi_b[0,:] * dq * psidz + dphi_b[2,:] * etaz
+
+        return dphi
+    else:
+        # Compute straight field line theta from the gradient
+        gdtheta = geom.interp_gdtheta_grid(psi, gtheta, nu=0)
+        theta = gtheta + gdtheta
+
+        # Storage for phi
+        phi = np.zeros(nump)
+
+        # Sum up the ballooning modes
+        for bundle in interp_balloon[0]:
+            ntor, mode = bundle
+            tor_eik = np.exp(1j*ntor*varphi)
+            phi += 2*np.real(sum_balloon_mode(q, theta, 1, ntor, mode, gradient=False) * (1.0-tfrac) * tor_eik)
 
         # If we need to do temporal interpolation, do that too
         if tfrac > 0.0:
             for bundle in interp_balloon[1]:
                 ntor, mode = bundle
                 tor_eik = np.exp(1j*ntor*varphi)
-                phi += 2*np.real(sum_balloon_mode(q, gtheta+gdtheta, 1, ntor, mode, gradient=False) * tfrac * tor_eik)
+                phi += 2*np.real(sum_balloon_mode(q, theta, 1, ntor, mode, gradient=False) * tfrac * tor_eik)
         
         return phi
 
