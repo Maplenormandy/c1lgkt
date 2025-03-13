@@ -81,6 +81,12 @@ class FieldHandler(Protocol):
         """
         ...
 
+    def request_geom(self) -> XgcGeomHandler | None:
+        """
+        Returns the geometry handler associated with the field handler
+        """
+        return None
+
 class RotatingFrameInfo(NamedTuple):
     """
     Named tuple holding some information for the reference frame the particle pusher should use
@@ -93,7 +99,7 @@ class RotatingFrameInfo(NamedTuple):
 
 tfrac_one = np.array([1.0])
 
-class ZonalFieldHandler:
+class ZonalFieldHandler(FieldHandler):
     def __init__(self, eq:Equilibrium):
         """
         Initializes a simple zero zonal electric field
@@ -344,6 +350,9 @@ class XgcFieldHandler(FieldHandler):
         self.interp_cache = []
         self.tind_cache = -1
 
+    def request_geom(self):
+        return self.geom
+
 class XgcLinearFieldHandler(XgcFieldHandler):
     """
     Same as the XgcFieldHandler, but uses linear interpolation on triangles rather than
@@ -414,6 +423,8 @@ class GaussHermiteFunction(BallooningModeInterpolator):
         mu_q, mu_eta, sigma_q, sigma_eta = self.params
         c = self.coefs
 
+        # TODO: Add overall phase factor to allow non-zero mean in \theta_k, k_\parallel
+
         ## Normalized coordinates
         z_q = (q - mu_q) / sigma_q
         z_eta = (eta - mu_eta) / sigma_eta
@@ -451,11 +462,32 @@ class GaussHermiteFieldHandler(FieldHandler):
     """
     Field handler for fields constructed from Gauss-Hermite coefficients
     """
-    def __init__(self, params):
-        self.params = params
+    def __init__(self, geom: XgcGeomHandler, interp_zpot, modes: BallooningInterpBundle):
+        """
+        Initializes the Gauss-Hermite field handler with a BallooningInterpBundle, which is an alias for
+        a list of tuples (n, BallooningModeInterpolator) where n is the toroidal mode number and the interpolator
+        is usually a GaussHermiteFunction.
 
-        # TODO: Set up a PlanarFluxCoordInterpolator
+        interp_zpot is a cubic spline for interpolating the zonal flows
+
+        TODO: Generalize this to be responsible for the field loading
+        """
+        self.interp_zpot = interp_zpot
+        self.modes = modes
+        self.geom = geom
+
+    def request_interp(self, tind: int) -> InterpTuple:
+        """
+        For now, just returns a static list of modes
+        """
+        return InterpTuple(zonal = self.interp_zpot, balloon = self.modes)
 
     def scale_conversion(self):
         # NOTE: XGC data is in V, but unit conventions are in kV
         return 1e-3
+    
+    def request_tind(self, t: float) -> tuple[int, float]:
+        return (0, 0.0)
+    
+    def request_geom(self):
+        return self.geom

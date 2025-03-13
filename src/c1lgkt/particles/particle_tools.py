@@ -173,12 +173,12 @@ def compute_punctures(t, ysol, fpunc, condpunc=None, period=-1):
 
     return ppuncs, npuncs
 
-def compute_toroidal_punctures(t, ysol, frame: RotatingFrameInfo):
+def compute_toroidal_punctures(t, ysol, frame: RotatingFrameInfo, period=2*np.pi/3):
     nump = ysol.shape[0]//5
 
     fpunc = ysol[1*nump:2*nump,:] - frame.omega_rotation * (t - frame.t0)
 
-    return compute_punctures(t, ysol, fpunc, period=2*np.pi/3)
+    return compute_punctures(t, ysol, fpunc, period=period)
 
 def compute_midplane_punctures(t, ysol, geom: XgcGeomHandler):
     """

@@ -416,11 +416,16 @@ def compute_fields(
         t, r, z, varphi,
         psi_ev,
         eq: Equilibrium,
-        geom: XgcGeomHandler,
         fields: FieldHandler,
         frame: RotatingFrameInfo | None,
         gradient: bool = True
         ):
+    """
+    Responsible for taking a FieldHandler and doing all the unpacking necessary to compute the fields
+    at the given physical time and position.
+
+    NOTE: Generally only one of mesh or balloon should be specified. If both are specified, mesh will be used.
+    """
     # Unpack some parameters
     nump = len(r)
     (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
@@ -451,6 +456,7 @@ def compute_fields(
         if interp0.mesh is not None:
             dphi = compute_mesh_interpolation(tfrac, r, z, varphi, psi_ev, eq, interp_mesh)
         elif interp0.balloon is not None:
+            geom = fields.request_geom()
             dphi = compute_balloon_interpolation(tfrac, r, z, varphi, psi_ev, eq, geom, interp_balloon)
         else:
             # If the non-zonal fields are not specified, initialize the fields with zeros
@@ -471,6 +477,7 @@ def compute_fields(
         if interp0.mesh is not None:
             phi = compute_mesh_interpolation(tfrac, r, z, varphi, psi_ev, eq, interp_mesh, gradient=False)
         elif interp0.balloon is not None:
+            geom = fields.request_geom()
             phi = compute_balloon_interpolation(tfrac, r, z, varphi, psi_ev, eq, geom, interp_balloon, gradient=False)
         else:
             # If the non-zonal fields are not specified, initialize the fields with zeros

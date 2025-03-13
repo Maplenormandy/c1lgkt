@@ -220,9 +220,23 @@ This is exactly analogous to \(f(x) = \tilde{F} e^{ikx}\) with \(k\) is a fixed 
 Our goal is to find an approximation to \(\tilde{f}_n\).
 
 Taking \(S=n(\zeta - q \eta)\), we can compute
-\begin{equation*}
-	\nabla (e^{iS} f_n(\rho, \eta)) = e^{iS} \left[i\nabla S f_n + \partial_q f_n \nabla q + \partial_\eta f_n \nabla \eta\right]
-\end{equation*}
+\begin{gather*}
+	\nabla (e^{iS} f_n(\rho, \eta)) = e^{iS} \left[i\nabla S f_n + \partial_q f_n \nabla q + \partial_\eta f_n \nabla \eta\right] \\
+	\nabla S = n(\nabla \zeta - q \nabla \eta - \eta \nabla q)
+\end{gather*}
+
+Note that in the ballooning representation, we also have
+\begin{gather*}
+	\tilde{S} = n(\zeta - q(\eta - \theta_k)) \\
+	\nabla(e^{i\tilde{S}} \tilde{f}_n(\theta_k, \eta)) = e^{i\tilde{S}} (i\nabla \tilde{S} \tilde{f}_n + \partial_\eta \tilde{f}_n \nabla \eta) \\
+	\nabla \tilde{S} = n(\nabla \zeta - q \nabla \eta - (\eta - \theta_k) \nabla q)
+\end{gather*}
+
+Note furthermore we have the gyroaverage operator taking the eikonal approximation
+\begin{gather*}
+	\ev{e^{i\tilde{S}}\tilde{f}_n(\theta_k, \eta)} \approx e^{i\tilde{S}} J_0(k_\perp \rho) \tilde{f}_n(\theta_k, \eta) \\
+	\vb{k}_\perp = \nabla \tilde{S}
+\end{gather*}
 
 \subsection{Up-down Symmetry}
 One final thing we do is to modify \(\theta_0\) to account for up-down symmetry.
