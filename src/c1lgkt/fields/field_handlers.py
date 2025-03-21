@@ -16,6 +16,8 @@ import scipy.integrate
 
 from .equilibrium import Equilibrium
 from .geometry_handlers import XgcGeomHandler, CubicTriInterpolatorMemoized
+from .utility import periodify, periodic_cubic_spline
+from .bicubic_interpolators import BicubicInterpolator
 
 from typing import Type, TypeVar, Protocol, NamedTuple
 
@@ -197,8 +199,8 @@ class XgcZonalFieldHandler(ZonalFieldHandler):
         super().__init__(eq)
         self.xgcdata = xgcdata
 
-        ## Load the zonal potential. Note we should convert to kV
-        self._zpot = self.xgcdata['pot00'][:,:]*1e-3
+        ## Load the zonal potential.
+        self._zpot = self.xgcdata['pot00'][:,:]
         # The psi grid on which the zonal potential is defined
         self._zpot_psi = self.xgcdata['psi00'][:]
 
@@ -211,6 +213,11 @@ class XgcZonalFieldHandler(ZonalFieldHandler):
     def set_tind(self, tind: int):
         self._phi_data = self._zpot[tind,:]
         self.interp_phi = scipy.interpolate.CubicSpline(self._phi_x, self._phi_data, bc_type='natural', extrapolate=True)
+
+    def scale_conversion(self):
+        # XGC units are in V, but we want to convert to kV
+        return self.phimult * 1e-3
+    
 
 # %% Define XGC Field handler class
 
@@ -403,6 +410,9 @@ class GaussHermiteFunction(BallooningModeInterpolator):
             self.coefs = coefs
         else:
             self.coefs = coefs[::2] + 1j*coefs[1::2]
+
+        # Sets the gyroaverage interpolator to None
+        self.j_interp : BicubicInterpolator | None = None
         
         # Old code: uses np.polynomial.hermite.hermval2d, which may be slow
         '''
@@ -423,7 +433,7 @@ class GaussHermiteFunction(BallooningModeInterpolator):
         mu_q, mu_eta, sigma_q, sigma_eta = self.params
         c = self.coefs
 
-        # TODO: Add overall phase factor to allow non-zero mean in \theta_k, k_\parallel
+        # TODO: Add overall phase factor to allow non-zero mean in \theta_k, k_\parallel?
 
         ## Normalized coordinates
         z_q = (q - mu_q) / sigma_q
@@ -453,9 +463,33 @@ class GaussHermiteFunction(BallooningModeInterpolator):
 
         ## Compute the function and its derivatives
         if gradient:
-            return (p*g, (p_q - z_q*p) * g/sigma_q, (p_eta - z_eta*p) * g/sigma_eta)
+            if self.j_interp is None:
+                phi = p * g
+                p_q = (p_q - z_q*p) * g / sigma_q
+                p_eta = (p_eta - z_eta*p) * g / sigma_eta
+
+                return (phi, p_q, p_eta)
+            else:
+                j0, dj0 = self.j_interp(q, eta, nu=(0,1))
+
+                phi = p * g * j0
+                phi_q = (p_q - z_q*p) * g * j0 / sigma_q + p * g * dj0[0]
+                phi_eta = (p_eta - z_eta*p) * g * j0 / sigma_eta + p * g * dj0[1]
+
+                return (phi, phi_q, phi_eta)
         else:
-            return p * g
+            if self.j_interp is None:
+                return p * g
+            else:
+                # If we have a gyroaveraging interpolator, compute the gyroaverage
+                j0 = self.j_interp(q, eta, nu=0)
+                return p * g * j0
+        
+    def set_j_interp(self, j_interp: BicubicInterpolator):
+        """
+        Sets the gyroaveraging interpolator for this Gauss-Hermite function
+        """
+        self.j_interp = j_interp
 
 
 class GaussHermiteFieldHandler(FieldHandler):
@@ -491,3 +525,81 @@ class GaussHermiteFieldHandler(FieldHandler):
     
     def request_geom(self):
         return self.geom
+    
+    def assemble_j_interp(self, ntor: int, mu: float, pm, pz):
+        """
+        Computes an interpolation function for J0(k_perp rho) for the given magnetic moment mu
+        as a function of (q, eta). Used for gyroaveaging
+        """
+        # Get the geometry's equilibrium
+        geom = self.geom
+        eq = geom.eq
+        
+        # Range of psi surfaces over which to compute the gyroaveraging interpolation function
+        ksurf0, ksurf1 = 1, geom.nsurf
+
+        ## First, resample each flux surface into a regular grid in eta
+        eta_samp = np.linspace(-3*np.pi, 3*np.pi, 256*3+1, endpoint=True)
+        j0_samp = np.empty((ksurf1-ksurf0, len(eta_samp)))
+
+        for ksurf in range(ksurf0, ksurf1):
+            rz_surf = geom.rz_node[geom.breaks_surf[ksurf]:geom.breaks_surf[ksurf+1],:]
+            theta_surf = geom.theta_node[geom.breaks_surf[ksurf]:geom.breaks_surf[ksurf+1]]
+
+            # Compute R,Z at the sampled points
+            r_interp = periodic_cubic_spline(theta_surf, rz_surf[:,0])
+            z_interp = periodic_cubic_spline(theta_surf, rz_surf[:,1])
+            r = r_interp(eta_samp)
+            z = z_interp(eta_samp)
+
+            # Compute magnetic terms that we need.
+            psi_ev, ff_ev = eq.compute_psi_and_ff(r, z)
+
+            ## Compute gyroradius rho at the sampled points
+            bv, bu, modb, gradmodb, curlbu = eq.compute_geom_terms(r, psi_ev, ff_ev)
+            rho = np.sqrt(2 * mu * modb * pm) / modb / np.abs(pz)
+
+            ## Compute kperp at the sampled points
+            (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
+
+            # compute q and terms for grad(q)
+            q = geom.interp_q(psi)
+            dq = geom.interp_q(psi, nu=1)
+
+            # compute terms for grad(eta)
+            # geometric angle
+            gtheta = np.arctan2(z - eq.zaxis, r - eq.raxis)
+            # terms used to compute the gradient of eta
+            dgdtheta = geom.interp_gdtheta_grid(psi, gtheta, nu=1)
+            # geometric minor radius squared
+            rg2 = (r - eq.raxis)**2 + (z - eq.zaxis)**2
+
+            # Compute grad(eta)
+            thetagr = (eq.zaxis - z) / rg2
+            thetagz = (r - eq.raxis) / rg2
+            etar = (1 + dgdtheta[1,:]) * thetagr + dgdtheta[0,:] * psidr
+            etaz = (1 + dgdtheta[1,:]) * thetagz + dgdtheta[0,:] * psidz
+            
+            # Actually compute k_perp
+            kr = ntor * (-q * etar - eta_samp * dq * psidr)
+            kz = ntor * (-q * etaz - eta_samp * dq * psidz)
+            kphi = ntor / r
+            kperp = np.sqrt(kr**2 + kz**2 + kphi**2)
+
+            # Compute J0(k_perp rho)
+            j0_samp[ksurf-ksurf0,:] = scipy.special.jv(0, kperp * rho)
+
+        ## Next, interpolate the sampled data to a regular grid in (q, eta)
+        # Note: q is negative, so we reverse the order of the q_samp array
+        q_samp = np.linspace(geom.interp_q(geom.psi_surf[ksurf0]), geom.interp_q(geom.psi_surf[ksurf1-1]), 256)[::-1]
+
+        j0_grid = np.empty((len(q_samp), len(eta_samp)))
+
+        for j in range(len(eta_samp)):
+            j0_interp = scipy.interpolate.CubicSpline(-geom.interp_q(geom.psi_surf[ksurf0:ksurf1]), j0_samp[:,j])
+            j0_grid[:,j] = j0_interp(q_samp)
+
+        # Now we can compute the gyroaveraging interpolation function
+        j_interp = BicubicInterpolator(j0_grid, ([np.min(q_samp), np.max(q_samp)], [np.min(eta_samp), np.max(eta_samp)]), bc_type=['natural', 'natural'])
+        return j_interp
+

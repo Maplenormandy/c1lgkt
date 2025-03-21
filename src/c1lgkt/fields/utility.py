@@ -3,7 +3,7 @@ A series of utility functions
 """
 
 import numpy as np
-
+import scipy.interpolate
 
 def periodify(z, period=2*np.pi):
     """
@@ -17,6 +17,12 @@ def periodify(z, period=2*np.pi):
         return np.unwrap(np.concatenate((z, [z[0]])), period=period)
     else:
         return np.concatenate((z, [z[0]]))
+
+def periodic_cubic_spline(theta, f) -> scipy.interpolate.CubicSpline:
+    """
+    A helper function for constructing periodic cubic splines.
+    """
+    return scipy.interpolate.CubicSpline(periodify(theta), periodify(f, period=0), bc_type='periodic')
 
 def md(z, period=2*np.pi):
     """

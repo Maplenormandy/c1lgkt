@@ -120,7 +120,7 @@ class BicubicInterpolator:
         else:
             self.dy = (self.ylim[1] - self.ylim[0]) / (f.shape[1]-1)
 
-    def __call__(self, x, y, nu=0):
+    def __call__(self, x: np.ndarray, y: np.ndarray, nu=0) -> np.ndarray | tuple[np.ndarray]:
         """
         This function computes f and its derivatives at the requested points xp using Bicubic Hermite interpolation.
 

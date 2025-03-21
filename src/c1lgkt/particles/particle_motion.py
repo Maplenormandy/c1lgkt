@@ -33,7 +33,8 @@ from typing import NamedTuple, Any
 # New particleparams definition, with type hinting
 class ParticleParams(NamedTuple):
     """
-    Named tuple holding particle properties for convenience and type hinting
+    Named tuple holding particle properties for convenience and type hinting.
+    vt is the velocity of a 1keV particle
     """
     z: float
     m: float

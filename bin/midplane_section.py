@@ -22,6 +22,8 @@ from c1lgkt.fields.geometry_handlers import XgcGeomHandler
 import c1lgkt.particles.particle_motion as particle_motion
 import c1lgkt.particles.particle_tools as particle_tools
 
+import os
+
 # %% Load the XGC data
 
 eq = Equilibrium.from_eqdfile(R'D:\Documents\IFS\hmode_jet\D3D141451.eqd')
@@ -58,7 +60,7 @@ ballFields = GaussHermiteFieldHandler(geom, interp_zpot, interp_balloon)
 
 # %% Set up initial conditions
 
-filelabel = 'midplane_deut_test_r50'
+filelabel = 'midplane_deut_trapped_r50'
 
 print('currently running: ' + filelabel)
 
@@ -72,7 +74,7 @@ rotating_frame = particle_motion.RotatingFrameInfo(0, omega_frame, tind0)
 t0 = rotating_frame.t0
 
 ## Choose which particle properties to use
-pp = particle_motion.elec
+pp = particle_motion.deut
 
 ## Set initial position
 #r0 = 2.2259
@@ -146,10 +148,11 @@ nstep = 80000*tmult
 ncheckpoint = 800
 
 # Initialize the values
-rk4_y = np.empty((5*nump,nstep+1))
-rk4_dy = np.empty((5*nump,nstep))
-rk4_t = np.linspace(t_span[0], t_span[1], nstep+1)
-rk4_y[:,0] = initial_conditions
+rk4_y_check = np.empty((5*nump,ncheckpoint))
+rk4_dy_check = np.empty((5*nump,ncheckpoint))
+rk4_t_check = np.empty(ncheckpoint)
+
+rk4_y = initial_conditions
 
 dt = (t_span[1] - t_span[0]) / nstep
 
@@ -157,32 +160,32 @@ f = particle_motion.f_driftkinetic
 #args = (eq, pp, xgcFields)
 args = (eq, pp, fields, rotating_frame)
 
-# Load any values
-num_saves = 0
-for kc in range(num_saves):
-    data = np.load(output_dir + 'sections/{}_{:05d}.npz'.format(filelabel, kc))
-    rk4_t[kc*ncheckpoint:(kc+1)*ncheckpoint] = data['t']
-    rk4_y[:,kc*ncheckpoint:(kc+1)*ncheckpoint] = data['y']
-    rk4_dy[:,kc*ncheckpoint:(kc+1)*ncheckpoint] = data['dy']
-
-k0 = max(num_saves*ncheckpoint - 1,0)
+# Check if the output directory exists, otherwise create it
+if not os.path.exists(output_dir + 'sections/{}'.format(filelabel)):
+    os.makedirs(output_dir + 'sections/{}'.format(filelabel))
 
 ## RK4 timestepper
-for k in tqdm(range(k0, nstep)):
-    y0 = rk4_y[:,k]
-    tk = rk4_t[k]
+for k in tqdm(range(nstep), dynamic_ncols=True):
+    y0 = rk4_y
+    tk = t_span[0] + dt*k
 
     k1 = f(tk, y0, *args)
     k2 = f(tk+dt/2, y0+k1*(dt/2), *args)
     k3 = f(tk+dt/2, y0+k2*(dt/2), *args)
     k4 = f(tk+dt, y0+k3*dt, *args)
 
-    y1 = y0 + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
-    rk4_dy[:,k] = (k1 + 2*k2 + 2*k3 + k4) / 6
-    rk4_y[:,k+1] = y1
+    rk4_dy = (k1 + 2*k2 + 2*k3 + k4) / 6
+    y1 = y0 + dt * rk4_dy
+
+    # Save the values at the checkpoints. Note that the last point can be reconstructed using dt
+    rk4_y_check[:,k % ncheckpoint] = y0
+    rk4_dy_check[:,k % ncheckpoint] = rk4_dy
+    rk4_t_check[k % ncheckpoint] = tk
+
+    rk4_y = y1
     
-    if k > 0 and k % ncheckpoint == 0:
-        np.savez(output_dir + 'sections/{}_{:05d}.npz'.format(filelabel, k//ncheckpoint - 1),
-                 t=rk4_t[k-ncheckpoint:k],
-                 y=rk4_y[:,k-ncheckpoint:k],
-                 dy=rk4_dy[:,k-ncheckpoint:k])
+    if (k+1) % ncheckpoint == 0:
+        np.savez(output_dir + 'sections/{}/{:05d}.npz'.format(filelabel, k//ncheckpoint),
+                 t=rk4_t_check,
+                 y=rk4_y_check,
+                 dy=rk4_dy_check)
