@@ -31,11 +31,13 @@ def sum_balloon_mode(
     If in gradient mode, returns the grad(q), grad(zeta), grad(theta) components of grad(phi_n).
     Otherwise, returns the value of phi_n.
     """
+    theta0 = mode.get_theta0()
+
     if gradient:
         dphi = np.zeros((3,)+q.shape, dtype=complex)
 
         for l in range(-l_max, l_max+1):
-            eta = theta + 2*np.pi*l
+            eta = theta + 2*np.pi*l - theta0
             f, f_q, f_eta = mode(q, eta, gradient=True)
             eik = np.exp(-1j*ntor*q*eta)
 
@@ -48,7 +50,7 @@ def sum_balloon_mode(
         phi = np.zeros(q.shape, dtype=complex)
 
         for l in range(-l_max, l_max+1):
-            eta = theta + 2*np.pi*l
+            eta = theta + 2*np.pi*l - theta0
             f = mode(q, eta, gradient=False)
             phi += f * np.exp(-1j*ntor*q*eta)
     

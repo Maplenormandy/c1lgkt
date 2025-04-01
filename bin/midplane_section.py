@@ -46,14 +46,14 @@ tind = 401
 zpot = xgcdata['pot00'][tind,:]
 zpot_psi = xgcdata['psi00'][:]
 interp_zpot = scipy.interpolate.CubicSpline(zpot_psi, zpot, extrapolate=True)
-zonalFields = XgcZonalFieldHandler(eq, xgcdata, 401)
+#zonalFields = XgcZonalFieldHandler(eq, xgcdata, 401)
 
 # Set up ballooning mode interpolator
 fit_results = np.load('./outputs/fit_results.npz', allow_pickle=True)
 params_g, params_gh = fit_results['params_g'], fit_results['params_gh']
 
 # Set up the interpolator
-mode = GaussHermiteFunction(params_g[:4], params_gh*0.5)
+mode = GaussHermiteFunction(params_g[:4], params_gh*0.0)
 interp_balloon = [(39, mode)]
 
 ballFields = GaussHermiteFieldHandler(geom, interp_zpot, interp_balloon)
@@ -89,15 +89,18 @@ bu = bv / modb
 
 ## Compute the rotation frequency and the mean parallel velocity
 psi0 = eq.interp_psi.ev(x0[0], x0[2])
-omega0 = -zonalFields.interp_phi(psi0, nu=1)*zonalFields.scale_conversion()
+omega0 = -ballFields.interp_zpot(psi0, nu=1)*ballFields.scale_conversion()
 vll_mean = eq.interp_ff(psi0) * omega0 / modb
 
 ## Determine the initial values of the integrals
 
+# Particle kinetic energy in keV and cos(pitch angle)
+ev0 = 0.7
+xi0 = np.sqrt(0.33)
 # Set the initial parallel velocity
-vll0 = vll_mean + pp.vt * np.sqrt(0.33) * np.sqrt(0.5)
+vll0 = vll_mean + pp.vt * xi0 * np.sqrt(ev0)
 # Initial magnetic moment
-mu0 = pp.m * (np.sqrt(0.67)*pp.vt * np.sqrt(0.5))**2 / 2 / modb
+mu0 = pp.m * (1-xi0**2) * (pp.vt * np.sqrt(ev0))**2 / 2 / modb
 
 
 fields = ballFields
@@ -107,14 +110,15 @@ fields = ballFields
 ham, lphi = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, mu0])), eq, pp, fields, rotating_frame)
 
 ## Compute a set of initial conditions
-nump = 16
+nump = 96
 #nump = 1
-varphi0 = np.linspace(0,2*np.pi/39, num=nump, endpoint=False)
+varphi_start = np.linspace(0,2*np.pi/39, num=nump, endpoint=False)
+r_start = np.linspace(r0-0.05, r0+0.05, num=nump)
 
 initial_conditions = np.empty(5*nump)
 
 for k in range(nump):
-    kll, pll_mean = particle_tools.compute_parallel_energy(t0, r0, z0, varphi0[k], mu0, ham, lphi, eq, pp, fields, rotating_frame)
+    kll, pll_mean = particle_tools.compute_parallel_energy(t0, r_start[k], z0, varphi_start[k], mu0, ham, lphi, eq, pp, fields, rotating_frame)
 
     if kll < 0:
         print("Warning: k={} has negative kinetic energy. Taking equal to zero".foramat(k))
@@ -122,8 +126,8 @@ for k in range(nump):
 
     vll = (pll_mean + np.choose(k%2, [1,-1]) * np.sqrt(2 * pp.m * kll)) / pp.m
 
-    initial_conditions[k + 0*nump] = r0
-    initial_conditions[k + 1*nump] = varphi0[k]
+    initial_conditions[k + 0*nump] = r_start[k]
+    initial_conditions[k + 1*nump] = varphi_start[k]
     initial_conditions[k + 2*nump] = z0
     initial_conditions[k + 3*nump] = vll
     initial_conditions[k + 4*nump] = mu0
@@ -135,7 +139,7 @@ for k in range(nump):
 output_dir = 'D:/Documents/IFS/hmode_jet/outputs/'
 
 if 'trapped' in filelabel:
-    tmult = 50
+    tmult = 1
 else:
     tmult = 10
 
@@ -145,6 +149,7 @@ if pp.z > 0:
 else:
     t_span = [t0, t0 + dt_xgc*80*tmult]
 nstep = 80000*tmult
+#nstep = 40000
 ncheckpoint = 800
 
 # Initialize the values

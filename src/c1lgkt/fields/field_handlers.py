@@ -40,6 +40,12 @@ class BallooningModeInterpolator(Protocol):
         """
         ...
 
+    def get_theta0(self) -> float:
+        """
+        Returns the value of theta0 for this ballooning mode interpolator
+        """
+        ...
+
 type ZonalInterpBundle = scipy.interpolate.CubicSpline
 type MeshInterpBundle = tuple[int,list[tri.TriInterpolator]]
 type BallooningInterpBundle = list[tuple[int,BallooningModeInterpolator]]
@@ -484,7 +490,11 @@ class GaussHermiteFunction(BallooningModeInterpolator):
                 # If we have a gyroaveraging interpolator, compute the gyroaverage
                 j0 = self.j_interp(q, eta, nu=0)
                 return p * g * j0
-        
+    
+    def get_theta0(self):
+        ## Return mu_eta as the value of theta0
+        return self.params[1]
+
     def set_j_interp(self, j_interp: BicubicInterpolator):
         """
         Sets the gyroaveraging interpolator for this Gauss-Hermite function
