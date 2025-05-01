@@ -53,14 +53,14 @@ fit_results = np.load('./outputs/fit_results.npz', allow_pickle=True)
 params_g, params_gh = fit_results['params_g'], fit_results['params_gh']
 
 # Set up the interpolator
-mode = GaussHermiteFunction(params_g[:4], params_gh*0.0)
+mode = GaussHermiteFunction(params_g[:4], params_gh*0.75)
 interp_balloon = [(39, mode)]
 
 ballFields = GaussHermiteFieldHandler(geom, interp_zpot, interp_balloon)
 
 # %% Set up initial conditions
 
-filelabel = 'midplane_deut_trapped_r50'
+filelabel = 'midplane_deut_trapped_r75'
 
 print('currently running: ' + filelabel)
 
@@ -95,7 +95,7 @@ vll_mean = eq.interp_ff(psi0) * omega0 / modb
 ## Determine the initial values of the integrals
 
 # Particle kinetic energy in keV and cos(pitch angle)
-ev0 = 0.7
+ev0 = 0.78
 xi0 = np.sqrt(0.33)
 # Set the initial parallel velocity
 vll0 = vll_mean + pp.vt * xi0 * np.sqrt(ev0)
@@ -110,10 +110,10 @@ fields = ballFields
 ham, lphi = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, mu0])), eq, pp, fields, rotating_frame)
 
 ## Compute a set of initial conditions
-nump = 96
+nump = 48
 #nump = 1
 varphi_start = np.linspace(0,2*np.pi/39, num=nump, endpoint=False)
-r_start = np.linspace(r0-0.05, r0+0.05, num=nump)
+r_start = np.linspace(r0-0.01, r0+0.01, num=nump)
 
 initial_conditions = np.empty(5*nump)
 
@@ -121,7 +121,7 @@ for k in range(nump):
     kll, pll_mean = particle_tools.compute_parallel_energy(t0, r_start[k], z0, varphi_start[k], mu0, ham, lphi, eq, pp, fields, rotating_frame)
 
     if kll < 0:
-        print("Warning: k={} has negative kinetic energy. Taking equal to zero".foramat(k))
+        print("Warning: k={} has negative kinetic energy. Taking equal to zero".format(k))
         kll = 0
 
     vll = (pll_mean + np.choose(k%2, [1,-1]) * np.sqrt(2 * pp.m * kll)) / pp.m
@@ -139,7 +139,7 @@ for k in range(nump):
 output_dir = 'D:/Documents/IFS/hmode_jet/outputs/'
 
 if 'trapped' in filelabel:
-    tmult = 1
+    tmult = 5
 else:
     tmult = 10
 

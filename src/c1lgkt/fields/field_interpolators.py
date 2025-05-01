@@ -2,7 +2,7 @@
 """
 @author: maple
 
-
+Contains codes for performing C1 interpolation on electromagnetic fields
 """
 
 import numpy as np
