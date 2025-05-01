@@ -25,6 +25,8 @@ from typing import Literal, NamedTuple
 from .utility import periodify, refine_max_position
 from .bicubic_interpolators import BicubicInterpolator
 
+import os
+
 # %% Memoized version of minE DOF estimator
 
 def barycentric_weights(x0, y0, x1, y1, x2, y2, x3, y3):
@@ -328,11 +330,16 @@ class XgcGeomHandler:
 
         ## Either load or assemble the finite difference matrices, used to compute gradients
         #  on the mesh nodes
-        if fdmat_filename != '':
+
+        # Check if the files exist
+        if fdmat_filename != '' or not os.path.exists(fdmat_filename):
             with open(fdmat_filename, 'rb') as f:
                 self.diff_r, self.diff_z = pickle.load(f)
         else:
             self.assemble_matrices()
+            if not os.path.exists(fdmat_filename):
+                self.save_matrices_to_file(fdmat_filename)
+
 
         ## Load the stiffness matrices needed to compute the minimum bending energy
         # cubic triangular interpolation
