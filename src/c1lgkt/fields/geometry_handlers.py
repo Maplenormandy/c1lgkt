@@ -35,7 +35,7 @@ def barycentric_weights(x0, y0, x1, y1, x2, y2, x3, y3):
     """
     # Precompute factors used in the area calculation
     denom = (y2 - y3)*(x1 - x3) + (x3 - x2)*(y1 - y3)
-    
+
     # Compute the barycentric coordinates directly
     w1 = ((y2 - y3)*(x0 - x3) + (x3 - x2)*(y0 - y3)) / denom
     w2 = ((y3 - y1)*(x0 - x3) + (x1 - x3)*(y0 - y3)) / denom
@@ -74,7 +74,7 @@ class _DOF_estimator_min_E_memoized(tri._triinterpolate._DOF_estimator):
         self.tri_dof = None
 
         super().__init__(Interpolator, dz=dz)
-        
+
 
     @staticmethod
     def compute_Kff_and_Kfc(reference_element, J, ecc, triangles):
@@ -164,7 +164,7 @@ class _DOF_estimator_min_E_memoized(tri._triinterpolate._DOF_estimator):
             # Building stiffness matrix and most of the force vector in coo format
             Kff_rows, Kff_cols, Kff_vals, Kfc_elem, Ff_indices = cls.compute_Kff_and_Kfc(
                 reference_element, J, eccs, triangles)
-            
+
             # Compute the Ff vector
             Uc_elem = np.expand_dims(Uc, axis=2)
             Ff_elem = -(Kfc_elem @ Uc_elem)[:, :, 0]
@@ -174,7 +174,7 @@ class _DOF_estimator_min_E_memoized(tri._triinterpolate._DOF_estimator):
             # We could use scipy.sparse direct solver; however to avoid this
             # external dependency an implementation of a simple PCG solver with
             # a simple diagonal Jacobi preconditioner is implemented.
-            
+
             n_dof = Ff.shape[0]
             Kff_coo = tri._triinterpolate._Sparse_Matrix_coo(Kff_vals, Kff_rows, Kff_cols,
                                         shape=(n_dof, n_dof))
@@ -198,7 +198,7 @@ class _DOF_estimator_min_E_memoized(tri._triinterpolate._DOF_estimator):
         dz[:, 0] = Uf[::2]
         dz[:, 1] = Uf[1::2]
         return dz
-    
+
     def compute_dof_from_df(self):
         """
         Memoize super's version of this function
@@ -209,7 +209,7 @@ class _DOF_estimator_min_E_memoized(tri._triinterpolate._DOF_estimator):
             self.tri_dof = super().compute_dof_from_df()
             self.dof_computed = True
             return self.tri_dof
-    
+
     @classmethod
     def save_matrices_to_file(cls, filename):
         with open(filename, 'wb') as f:
@@ -227,7 +227,7 @@ class CubicTriInterpolatorMemoized(tri.CubicTriInterpolator):
     """
     This is a modification of matplotlib.tri.CubicTriInterpolator which uses memoization
     and is able to use the custom DOF estimator _DOF_estimator_min_E_memoized.
-    
+
     Note that while there a few minor optimizations in this class itself (avoiding some
     duplicate computations and memoizing some computations), the vast majority of the savings
     come from fixing the CG algorithm and avoiding the reassembly of the stiffness matrices
@@ -319,7 +319,7 @@ class XgcGeomHandler:
             tridata = f.readlines()
             rawdata = list(list(map(int, l.split())) for l in tridata[1:])
             triangles = np.array(rawdata, dtype=int)[:,1:] - 1
-        
+
         rz_tri = tri.Triangulation(self.rz_node[:,0], self.rz_node[:,1], triangles=triangles)
         # Needed for CubicTriInterpolator
         rz_tri.get_cpp_triangulation()
@@ -332,7 +332,7 @@ class XgcGeomHandler:
         #  on the mesh nodes
 
         # Check if the files exist
-        if fdmat_filename != '' or not os.path.exists(fdmat_filename):
+        if fdmat_filename != '' and os.path.exists(fdmat_filename):
             with open(fdmat_filename, 'rb') as f:
                 self.diff_r, self.diff_z = pickle.load(f)
         else:
@@ -343,11 +343,14 @@ class XgcGeomHandler:
 
         ## Load the stiffness matrices needed to compute the minimum bending energy
         # cubic triangular interpolation
-        if min_e_filename != '':
+        if min_e_filename != '' and os.path.exists(min_e_filename):
             _DOF_estimator_min_E_memoized.load_matrices_from_file(min_e_filename)
 
         ## Set up the straight field-line coordinates
         self.init_theta(theta0_mode=theta0_mode)
+
+        if min_e_filename != '' and not os.path.exists(min_e_filename):
+            self.save_matrices_to_file(fdmat_filename, min_e_filename)
 
     def init_theta(self, theta0_mode: Literal['midplane', 'max_drive'] = 'midplane'):
         """
@@ -487,7 +490,7 @@ class XgcGeomHandler:
         for k in range(ksurf0, ksurf1):
             interp_gdtheta = scipy.interpolate.CubicSpline(self.gtheta_surf[k], self.gdtheta_surf[k], bc_type='periodic')
             gdtheta_samp[k-ksurf0,:] = interp_gdtheta(self.theta_samp)
-        
+
         # Then, resample psi on a regular grid
         self.gdtheta_grid = np.empty((len(self.psi_samp), len(self.theta_samp)))
         for j in range(len(self.theta_samp)):
@@ -554,7 +557,7 @@ class XgcGeomHandler:
             data_tri2node[3*k:3*k+3] = area
             diag_tri2node_weight[triangles[k,:]] += area
 
-    
+
         node2tri_r = scipy.sparse.csr_array((data_node2tri_r, (rowind_node2tri, colind_node2tri)), shape=(ntri,nnode))
         node2tri_z = scipy.sparse.csr_array((data_node2tri_z, (rowind_node2tri, colind_node2tri)), shape=(ntri,nnode))
         tri2node = scipy.sparse.csr_array((data_tri2node, (colind_node2tri, rowind_node2tri)), shape=(nnode,ntri))
@@ -635,7 +638,7 @@ class XgcGeomHandler:
                     data_jmat[knode*3*ngyro+kg*3:knode*3*ngyro+(kg+1)*3] = 0
                 else:
                     nodes = geom.rz_tri.triangles[ktri,:]
-                    
+
                     # Set col index (i.e. input node) of the sparse matrix
                     colind_jmat[knode*3*ngyro+kg*3:knode*3*ngyro+(kg+1)*3] = nodes
                     data_jmat[knode*3*ngyro+kg*3:knode*3*ngyro+(kg+1)*3] = \
@@ -643,7 +646,7 @@ class XgcGeomHandler:
                                                 geom.rz_node[nodes[0],0], geom.rz_node[nodes[0],1],
                                                 geom.rz_node[nodes[1],0], geom.rz_node[nodes[1],1],
                                                 geom.rz_node[nodes[2],0], geom.rz_node[nodes[2],1]) * gyweight
-                    
+
 
         jmat = scipy.sparse.csr_array((data_jmat, (rowind_jmat, colind_jmat)))
 
