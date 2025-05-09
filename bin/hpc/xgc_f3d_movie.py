@@ -34,7 +34,6 @@ geom_files = {
     'ele_filename': R'/global/cfs/cdirs/m3736/XGC1_H/D3D_elec_rgn1_run4/Seo.eqd.ele',
     'fdmat_filename': R'./outputs/fdmat.pkl',
     'min_e_filename': R'./outputs/min_E_mat.pkl'
-    
 }
 geom = XgcGeomHandler(eq, xgcdata, theta0_mode='midplane', **geom_files)
 
