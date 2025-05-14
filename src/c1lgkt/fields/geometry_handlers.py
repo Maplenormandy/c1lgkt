@@ -349,8 +349,12 @@ class XgcGeomHandler:
         ## Set up the straight field-line coordinates
         self.init_theta(theta0_mode=theta0_mode)
 
+        # Save the min_E matrices to a file if they don't exist
         if min_e_filename != '' and not os.path.exists(min_e_filename):
             self.save_matrices_to_file(fdmat_filename, min_e_filename)
+
+        ## Assemble the flux surface average matrix
+        self.assemble_flux_surf_avg()
 
     def init_theta(self, theta0_mode: Literal['midplane', 'max_drive'] = 'midplane'):
         """
@@ -382,6 +386,8 @@ class XgcGeomHandler:
         ## psi and q of each flux surface
         self.psi_surf = np.empty(self.nsurf)
         self.q_surf = np.empty(self.nsurf)
+        ## Differential volume V'(psi) of each flux surface, used for flux surface averages
+        self.dvol_surf = np.zeros(self.nsurf)
 
         ## Straight field-line theta stored on the nodes
         self.theta_node = np.zeros(self.nnode)
@@ -401,12 +407,19 @@ class XgcGeomHandler:
 
             self.psi_surf[k] = np.average(self.psi_node[surfslice])
             rz_surf = self.rz_node[self.breaks_surf[k]:self.breaks_surf[k+1],:]
+            
+            ## Compute the flux surface volume
+            integrand_node = 1.0 / bp[surfslice]
+            integrand_edge = np.empty(len(integrand_node))
+            integrand_edge[0] = 0.5 * (integrand_node[0] + integrand_node[-1]) * np.linalg.norm(rz_surf[0,:] - rz_surf[-1,:])
+            integrand_edge[1:] = 0.5 * (integrand_node[1:] + integrand_node[:-1]) * np.linalg.norm(np.diff(rz_surf, axis=0), axis=1)
+            self.dvol_surf[k] = 2*np.pi*np.sum(integrand_edge)
 
             # Value of the integrand on nodes for computing straight field-line coordinates. See
             # https://xgc.pppl.gov/html/meshing_tutorial.html, section on `relation to flux-coordinates'
             integrand_node = f[surfslice] / bp[surfslice]
 
-            # Value of the integrand on edges times dl
+            # Value of the integrand on edges times dl, i.e. to perform trapezoidal rule
             integrand_edge = np.empty(len(integrand_node))
             integrand_edge[0] = 0.5 * (integrand_node[0] + integrand_node[-1]) * np.linalg.norm(rz_surf[0,:] - rz_surf[-1,:])
             integrand_edge[1:] = 0.5 * (integrand_node[1:] + integrand_node[:-1]) * np.linalg.norm(np.diff(rz_surf, axis=0), axis=1)
@@ -415,6 +428,7 @@ class XgcGeomHandler:
             # mesh node is located on the surface. We need to improve that guess
             self.q_surf[k] = np.sum(integrand_edge) / 2 / np.pi
             theta_raw = np.cumsum(integrand_edge) / self.q_surf[k]
+
 
             # Get the geometric theta
             gtheta = np.unwrap(np.arctan2(rz_surf[:,1]-self.zaxis, rz_surf[:,0]-self.raxis))
@@ -513,6 +527,74 @@ class XgcGeomHandler:
         theta = gtheta + gdtheta
 
         return theta
+    
+    def assemble_flux_surf_avg(self):
+        """
+        Prepares the sparse matrices used to perform flux surface averages
+        """
+        # Poloidal magnetic field, which is the Jacobian of the flux surface average
+        bp = np.linalg.norm(self.b_node[:,:2], axis=1)
+
+        ## Data for constructing the sparse matrices used for averaging
+        # These are used for the averaging operation
+        # NOTE: the zeroth node is not part of any surface, we just have an empty entry for it
+        data_surfavg = np.zeros(self.nnode_surf)
+        rowind_surfavg = np.zeros(self.nnode_surf, dtype=int)
+        colind_surfavg = np.zeros(self.nnode_surf, dtype=int) # Column corresponds to input
+
+        # This is used for taking a flux surface average and returning the value at the nodes
+        data_surfnode = np.ones(self.nnode_surf)
+        rowind_surfnode = np.zeros(self.nnode_surf, dtype=int)
+        colind_surfnode = np.zeros(self.nnode_surf, dtype=int) # Column corresponds to input
+
+        data_surfnode[0] = 0
+
+        for k in range(self.nsurf):
+            # Simplify notation for indexing into the array of nodes
+            surfslice = np.index_exp[self.breaks_surf[k]:self.breaks_surf[k+1]]
+
+            # Compute the length elements dl
+            rz_surf = self.rz_node[self.breaks_surf[k]:self.breaks_surf[k+1],:]
+            dl = np.zeros(rz_surf.shape[0])
+            dl[0] += 0.5*np.linalg.norm(rz_surf[0,:] - rz_surf[-1,:])
+            dl[1:] += 0.5*np.linalg.norm(np.diff(rz_surf, axis=0), axis=1)
+            dl[-1] += 0.5*np.linalg.norm(rz_surf[0,:] - rz_surf[-1,:])
+            dl[:-1] += 0.5*np.linalg.norm(np.diff(rz_surf, axis=0), axis=1)
+
+            rowind_surfavg[surfslice] = k
+            colind_surfavg[surfslice] = np.arange(self.breaks_surf[k], self.breaks_surf[k+1], dtype=int)
+            data_surfavg[surfslice] = (2*np.pi*dl / bp[surfslice]) / (self.dvol_surf[k])
+
+            rowind_surfnode[surfslice] = np.arange(self.breaks_surf[k], self.breaks_surf[k+1], dtype=int)
+            colind_surfnode[surfslice] = k
+
+        # This matrix is responsible for performing the flux surface average
+        self.avg_surf = scipy.sparse.csr_array((data_surfavg, (rowind_surfavg, colind_surfavg)), shape=(self.nsurf,self.nnode))
+
+        # This matrix takes a flux surface average and returns the value at the nodes
+        self.surf_to_node = scipy.sparse.csr_array((data_surfnode, (rowind_surfnode, colind_surfnode)), shape=(self.nnode,self.nsurf))
+    
+    def flux_surf_avg(self, f, nodal=False):
+        """
+        Returns the flux surface average of a function f defined on the mesh nodes.
+        If there is more than one axis, it will detect which axis is the nodal axis,
+        and averages over all other axes, i.e. to perform a toroidal average.
+
+        If nodal is True, returns the flux surface average at the nodes in addition to the
+        psi grid
+        """
+        if f.ndim > 1:
+            # Get all axes except ones where the length of the axis is equal to nnode,
+            # which should hopefully be the nodal axis
+            inds = tuple(n for n in range(f.ndim) if f.shape[n] != self.nnode)
+            # Average over all non-nodal axes
+            f = np.mean(f, axis=inds)
+            
+        if nodal:
+            f_surf = self.avg_surf @ f
+            return f_surf, self.surf_to_node @ f_surf
+        else:
+            return self.avg_surf @ f
 
     def assemble_matrices(self):
         """
@@ -531,8 +613,8 @@ class XgcGeomHandler:
         diag_tri2node_weight = np.zeros(nnode)
 
         # Row, column indices of mapping between triangles and nodes
-        rowind_node2tri = np.empty(3*ntri)
-        colind_node2tri = np.empty(3*ntri) # Column corresponds to input
+        rowind_node2tri = np.empty(3*ntri, dtype=int)
+        colind_node2tri = np.empty(3*ntri, dtype=int) # Column corresponds to input
 
         for k in tqdm(range(ntri), desc='Assembling matrices:'):
             # Set the row and column indices
@@ -594,7 +676,7 @@ class XgcGeomHandler:
         rowind_jmat = np.empty(3*ngyro*geom.nnode, dtype=int)
         colind_jmat = np.empty(3*ngyro*geom.nnode, dtype=int)
 
-        for knode in tqdm(range(geom.nnode)):
+        for knode in range(geom.nnode):
             # Position of node
             rz = geom.rz_node[knode,:]
 

@@ -69,8 +69,6 @@ zpot_psi = xgcdata['psi00'][:]
 zfield = np.diff(zpot, axis=1) / np.diff(zpot_psi)[np.newaxis,:]
 t = xgcdata['t'][:]
 
-tind0 = 100
-
 # %% Define function to plot the data
 
 def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
@@ -110,6 +108,10 @@ def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
 
     # Compute initial value of the integrals
     ham0, lphi0 = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, mu0])), eq, pp, zonalFields, rotating_frame)
+
+    # Set up the gyroaverage matrix
+    jmat = geom.assemble_jmat(mu0, pp.m, pp.z)
+    xgcFields.set_jmat(jmat)
 
     return rotating_frame, mu0, ham0, lphi0
 
@@ -292,6 +294,7 @@ if __name__ == '__main__':
     n_procs = mp.cpu_count()
 
     print(f'Using {n_procs} processes', flush=True)
+
 
     tinds = np.arange(100, 500, 5, dtype=int)
 

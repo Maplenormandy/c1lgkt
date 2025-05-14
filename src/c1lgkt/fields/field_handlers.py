@@ -9,7 +9,7 @@ import numpy as np
 import scipy.interpolate
 import scipy.integrate
 
-# Below are some hacks to load eqtools. TODO: Figure out how to remove dependencies
+# Below are some hacks to load eqtools.
 #import sys
 #sys.path.append(R'C:\Users\maple\OneDrive\Research\IFS\Scripts\libs\eqtools')
 #from eqtools import eqdskreader, pfilereader # type: ignore
