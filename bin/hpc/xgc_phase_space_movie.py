@@ -69,6 +69,19 @@ zpot_psi = xgcdata['psi00'][:]
 zfield = np.diff(zpot, axis=1) / np.diff(zpot_psi)[np.newaxis,:]
 t = xgcdata['t'][:]
 
+# %% Analysis presets
+
+
+#analysis = {
+#    'xi0': np.sqrt(0.67),
+#    'name': 'trapped'
+#}
+
+analysis = {
+    'xi0': np.sqrt(0.33),
+    'name': 'passing'
+}
+
 # %% Define function to plot the data
 
 def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
@@ -100,7 +113,7 @@ def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
 
     # Particle kinetic energy in keV and cos(pitch angle)
     ev0 = 0.78
-    xi0 = np.sqrt(0.33)
+    xi0 = analysis['xi0']
     # Set the initial parallel velocity
     vll0 = vll_mean + pp.vt * xi0 * np.sqrt(ev0)
     # Initial magnetic moment
@@ -263,7 +276,7 @@ def plot_phase_space(tind, fp_physical, fn_physical):
 
     plt.tight_layout(pad=0.08)
 
-    plt.savefig(f'./outputs/phase_space_movie/phase_space_trapped_{tind:04d}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'./outputs/phase_space_movie/phase_space_{analysis["name"]}_{tind:04d}.png', dpi=300, bbox_inches='tight')
 
     plt.close(fig)
 
