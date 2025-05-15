@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import scipy.interpolate
 
+import gudhi
+
 from adios2 import FileReader
 from netCDF4 import Dataset
 
@@ -27,16 +29,18 @@ import os
 
 import time
 
+import pickle
+
 mpl.use('Agg')
 
 # %% Load basic data files
 
 eq = Equilibrium.from_eqdfile(R'./outputs/D3D141451.eqd')
 
-xgcdata = Dataset('/global/cfs/cdirs/m3736/Rotation_paper_data/XGC1.nc')
+xgcdata = Dataset('/pscratch/sd/n/normandy/XGC1.nc')
 
 geom_files = {
-    'ele_filename': R'/global/cfs/cdirs/m3736/XGC1_H/D3D_elec_rgn1_run4/Seo.eqd.ele',
+    'ele_filename': R'/pscratch/sd/n/normandy/D3D_elec_rgn1_run4/Seo.eqd.ele',
     'fdmat_filename': R'./outputs/fdmat.pkl',
     'min_e_filename': R'./outputs/min_E_mat.pkl'
     
@@ -51,7 +55,7 @@ uph = np.load('./outputs/phase_vel.npz')['u_lstsq']
 
 # %% Load the reference temperatures and other info that are used for normalization
 
-file_root = R'/global/cfs/cdirs/m3736/XGC1_H/D3D_elec_rgn1_run4'
+file_root = R'/pscratch/sd/n/normandy/D3D_elec_rgn1_run4'
 mesh_file = file_root + '/xgc.f0.mesh.bp'
 
 with FileReader(mesh_file) as s:
@@ -72,15 +76,15 @@ t = xgcdata['t'][:]
 # %% Analysis presets
 
 
-analysis = {
-    'xi0': np.sqrt(0.67),
-    'name': 'passing'
-}
-
 #analysis = {
-#    'xi0': np.sqrt(0.33),
-#    'name': 'trapped'
+#    'xi0': np.sqrt(0.67),
+#    'name': 'passing'
 #}
+
+analysis = {
+    'xi0': np.sqrt(0.33),
+    'name': 'trapped'
+}
 
 # %% Define function to plot the data
 
@@ -123,8 +127,8 @@ def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
     ham0, lphi0 = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, mu0])), eq, pp, zonalFields, rotating_frame)
 
     # Set up the gyroaverage matrix
-    jmat = geom.assemble_jmat(mu0, pp.m, pp.z)
-    xgcFields.set_jmat(jmat)
+    #jmat = geom.assemble_jmat(mu0, pp.m, pp.z)
+    #xgcFields.set_jmat(jmat)
 
     return rotating_frame, mu0, ham0, lphi0
 
@@ -174,16 +178,32 @@ def compute_interpolated_distribution(tind, f0_reader: FileReader, pp: particle_
     end_time = time.perf_counter()
     print(f'Loaded {n1-n0} nodes in {end_time-start_time:.2f} seconds', flush=True)
 
+    # Get varphi of the toroidal plane; note that f0 is on half-integer planes starting at -1/2 (?)
+    varphi = 2*np.pi/48 * -0.5
+
+    varphi_arr = np.ones(n1-n0) * varphi
+    r_arr = geom.rz_node[n0:n1,0]
+    z_arr = geom.rz_node[n0:n1,1]
+
+    kll_arr, pll_mean_arr = particle_tools.compute_parallel_energy(t0, r_arr, z_arr, varphi_arr, np.ones(n1-n0)*mu0, ham0, lphi0, eq, pp, xgcFields, rotating_frame)
+
     ## Iterate over the nodes
     for knode in range(n0, n1):
+        ## Get the initial parallel energy and mean parallel velocity
+        kll = kll_arr[knode-n0]
+        pll_mean = pll_mean_arr[knode-n0]
+        
+        if kll < 0:
+            # If parallel energy is negative, skip this node
+            f_mask[knode] = False
+            continue
+
         ## Unmask nodes that we iterate over
         f_mask[knode] = True
 
         ## Spatial coordinates
         # Get the (R,Z) coordinates of the node
         r, z = geom.rz_node[knode,:]
-        # Get varphi of the toroidal plane; note that f0 is on half-integer planes starting at -1/2 (?)
-        varphi = 2*np.pi/48 * -0.5
 
         ## Magnetic geometry stuff
         psi_ev, ff_ev = eq.compute_psi_and_ff(np.array([r]), np.array([z]))
@@ -195,11 +215,8 @@ def compute_interpolated_distribution(tind, f0_reader: FileReader, pp: particle_
         # Normalized perpendicular velocity
         vperp_n = np.sqrt(2 * mu0 * modb[0] / pp.m) / vt
         # Parallel energy
-        kll, pll_mean = particle_tools.compute_parallel_energy(t0, r, z, varphi, mu0, ham0, lphi0, eq, pp, xgcFields, rotating_frame)
-        if kll < 0:
-            # If parallel energy is negative, skip this node
-            f_mask[knode] = False
-            continue
+
+        
 
         # Positive and negative parallel velocities
         vllp = (pll_mean + np.sqrt(2 * pp.m * kll) / pp.m)
@@ -226,64 +243,68 @@ def compute_interpolated_distribution(tind, f0_reader: FileReader, pp: particle_
 
     return fp_physical, fn_physical, f_mask
 
-def plot_phase_space(tind, fp_physical, fn_physical):
-    # Set up colorbar
-    tw_repeated = mpl.cm.twilight(np.mod(np.linspace(0, 2, 256),1))
-    twr_cmap = mpl.colors.LinearSegmentedColormap.from_list('twilight_repeated', tw_repeated, N=256)
 
-    # Set up range for colorbar
+def compute_sublevel_persistence(f):
+    """
+    Computes the sublevel persistence diagram for the given filtration values.
+    """
+
+    st = gudhi.simplex_tree.SimplexTree()
+
+    # Insert vertices with filtration values into the tree.
+    for i in range(geom.nnode_surf):
+        if np.isfinite(f[i]):
+            # Insert the vertex with the filtration value
+            st.insert([i], f[i])
+
+    # Insert edges and triangles with max filtration value of their vertices
+    for tri in geom.rz_tri.triangles:
+        edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]]
+        for edge in edges:
+            f_edge = np.max([f[edge[0]], f[edge[1]]])
+            if np.isfinite(f_edge):
+                st.insert(edge, f_edge)
+
+        f_tri = np.max([f[tri[0]], f[tri[1]], f[tri[2]]])
+        if np.isfinite(f_tri):
+            st.insert(tri, f_tri)
+
+    # Compute the persistence diagram
+    persistence = st.persistence()
+
+    return persistence
+
+def compute_normalized_persistences(fp_physical, fn_physical):
+    # Set up normalization range
     f_max = np.nanpercentile([fp_physical, fn_physical], 95)
     f_min = np.nanpercentile([fp_physical, fn_physical], 5)
 
-    # Pick out q=2 surface
-    ksurf = np.searchsorted(-geom.q_surf, 2.0)
-    rz_surf = geom.rz_node[geom.breaks_surf[ksurf]:geom.breaks_surf[ksurf+1],:]
+    # Compute the persistence diagrams
+    pp_lower = compute_sublevel_persistence(fp_physical)
+    pn_lower = compute_sublevel_persistence(fn_physical)
+    pp_upper = compute_sublevel_persistence(-fp_physical)
+    pn_upper = compute_sublevel_persistence(-fn_physical)
 
-    # Set up the figure
-    fig, axs = plt.subplots(1, 3, width_ratios=[1, 1, 1], figsize=(19.2, 10.8))
+    return pp_lower, pn_lower, pp_upper, pn_upper
 
-    axs[0].set_aspect('equal', adjustable='box')
-    axs[0].tripcolor(geom.rz_tri, fp_physical, shading='gouraud', rasterized=True, cmap=twr_cmap, vmin=f_min, vmax=f_max)
-    axs[0].plot(rz_surf[:,0], rz_surf[:,1], c='k', ls=':')
+def plot_persistence_diagram(tind, p_list):
+    pp_lower, pn_lower, pp_upper, pn_upper = p_list
 
-    axs[0].set_title(R'$v_\parallel > 0$')
+    p_lower_norm = list((dim, (b*1e-8, d*1e-8)) for dim, (b, d) in pp_lower+pn_lower)
+    p_upper_norm = list((dim, (-b*1e-8, -d*1e-8)) for dim, (b, d) in pp_upper+pn_upper)
 
-    axs[0].set_xlim([1.1, 2.3])
-    axs[0].set_ylim([-0.95, 0.85])
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6), dpi=100)
 
-    #ax2 = plt.subplot(122, sharex=ax1, sharey=ax1)
-    axs[1].set_aspect('equal', adjustable='box')
-    #plt.axis('equal')
-    pc = axs[1].tripcolor(geom.rz_tri, fn_physical, shading='gouraud', rasterized=True, cmap=twr_cmap, vmin=f_min, vmax=f_max)
-    axs[1].plot(rz_surf[:,0], rz_surf[:,1], c='k', ls=':')
+    plt.suptitle(f't = {t[tind]*1e3} ms')
 
-    axs[1].set_title(R'$v_\parallel < 0$')
+    gudhi.plot_persistence_diagram(p_lower_norm, axes=axs[0])
+    gudhi.plot_persistence_diagram(p_upper_norm, axes=axs[1])
+    axs[0].set_title('Sub level set persistence')
+    axs[1].set_title('Super level set persistence')
 
-    axs[1].set_xlim([1.1, 2.3])
-    axs[1].set_ylim([-0.95, 0.85])
+    plt.savefig(f'./outputs/phase_space_tda/persistence_diagram_{tind}.png', dpi=300)
 
-    cax = axs[0].inset_axes([0.6, 0.07, 0.4, 0.01])
-
-    plt.colorbar(pc, cax=cax, orientation='horizontal', label='ion gyrocenter distrib. $f_i$')
-
-    tind0 = 100
-    pc = axs[2].pcolormesh(zpot_psi[130:-30], t[tind0-1:]*1e3, -zfield[tind0:,130:-30])
-    axs[2].set_title('zonal flows')
-    axs[2].axhline(t[tind]*1e3, c='tab:red', ls='--')
-    axs[2].set_ylabel(R'$t$ [ms]')
-    axs[2].set_xlabel(R'$\psi$')
-
-    plt.colorbar(pc, ax=axs[2], label=R'$d\langle\phi\rangle/d\psi$')
-
-    plt.tight_layout(pad=0.08)
-
-    plt.savefig(f'./outputs/phase_space_movie/phase_space_{analysis["name"]}_{tind:04d}.png', dpi=300, bbox_inches='tight')
-
-    plt.close(fig)
-
-
-
-def plot_frame(tind):
+def analyze_frame(tind):
     ## Get the right file to load
     step = tind*20
     f0_file = file_root + f'/xgc.orbit.f0.{step:05d}.bp'
@@ -295,7 +316,13 @@ def plot_frame(tind):
     integrals = compute_initial_integrals(tind, 196, pp)
     with FileReader(f0_file) as f0_reader:
         fp_physical, fn_physical, f_mask = compute_interpolated_distribution(tind, f0_reader, pp, integrals)
-    plot_phase_space(tind, fp_physical, fn_physical)
+
+    p_list = compute_normalized_persistences(fp_physical, fn_physical)
+
+    with open(f'./outputs/phase_space_tda/persistence_diagram_{tind}.pkl', 'wb') as f:
+        pickle.dump(p_list, f)
+
+    plot_persistence_diagram(tind, p_list)
 
     print(f'Finished {tind}', flush=True)
 
@@ -313,10 +340,17 @@ if __name__ == '__main__':
 
     tinds = np.arange(100, 500, 5, dtype=int)
 
+    #tind = 350
+    #with open(f'./outputs/phase_space_tda/persistence_diagram_{tind}.pkl', 'rb') as f:
+    #    p_list = pickle.load(f)
+    #plot_persistence_diagram(tind, p_list)
+
+    #analyze_frame(350)
+
     # Set up the multiprocessing pool
     with mp.Pool(processes=n_procs) as pool:
         # Use the pool to process the files in parallel
-        results = pool.map(plot_frame, tinds)
+        results = pool.map(analyze_frame, tinds)
 
     
 
