@@ -132,7 +132,7 @@ def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
 
     return rotating_frame, mu0, ham0, lphi0
 
-def compute_interpolated_distribution(tind, f0_reader: FileReader, pp: particle_motion.ParticleParams, integrals):
+def compute_interpolated_distribution(tind, nphi, f0_reader: FileReader, pp: particle_motion.ParticleParams, integrals):
     ## Unpack the integrals
     rotating_frame, mu0, ham0, lphi0 = integrals
     t0 = rotating_frame.t0
@@ -173,13 +173,13 @@ def compute_interpolated_distribution(tind, f0_reader: FileReader, pp: particle_
     start_time = time.perf_counter()
 
     # Load the distribution function data
-    f_xgc = np.squeeze(f0_reader.read('i_f', start=[0, 0, n0, 0], count=[1, nmu, n1-n0, nvp]))
+    f_xgc = np.squeeze(f0_reader.read('i_f', start=[nphi, 0, n0, 0], count=[1, nmu, n1-n0, nvp]))
 
     end_time = time.perf_counter()
-    print(f'Loaded {n1-n0} nodes in {end_time-start_time:.2f} seconds', flush=True)
+    #print(f'Loaded {n1-n0} nodes in {end_time-start_time:.2f} seconds', flush=True)
 
     # Get varphi of the toroidal plane; note that f0 is on half-integer planes starting at -1/2 (?)
-    varphi = 2*np.pi/48 * -0.5
+    varphi = 2*np.pi/48 * (nphi-0.5)
 
     varphi_arr = np.ones(n1-n0) * varphi
     r_arr = geom.rz_node[n0:n1,0]
@@ -274,7 +274,7 @@ def compute_sublevel_persistence(f):
 
     return persistence
 
-def compute_normalized_persistences(fp_physical, fn_physical):
+def compute_all_persistences(fp_physical, fn_physical):
     # Set up normalization range
     f_max = np.nanpercentile([fp_physical, fn_physical], 95)
     f_min = np.nanpercentile([fp_physical, fn_physical], 5)
@@ -287,22 +287,71 @@ def compute_normalized_persistences(fp_physical, fn_physical):
 
     return pp_lower, pn_lower, pp_upper, pn_upper
 
-def plot_persistence_diagram(tind, p_list):
-    pp_lower, pn_lower, pp_upper, pn_upper = p_list
 
-    p_lower_norm = list((dim, (b*1e-8, d*1e-8)) for dim, (b, d) in pp_lower+pn_lower)
-    p_upper_norm = list((dim, (-b*1e-8, -d*1e-8)) for dim, (b, d) in pp_upper+pn_upper)
+def compact_persistence(p):
+    """
+    This function takes a persistence diagram and returns numpy arrays of births and deaths suitable
+    for plotting
+    """
+    
+    # Put all the data into numpy arrays
+    births = np.empty(len(p))
+    deaths = np.empty(len(p))
+    dims = np.empty(len(p), dtype=int)
+    for i, (dim, (b, d)) in enumerate(p):
+        births[i] = b
+        deaths[i] = d
+        dims[i] = dim
 
-    fig, axs = plt.subplots(1, 2, figsize=(12, 6), dpi=100)
+    # Sort the data by dimension
+    dimsort = np.argsort(dims)
+    births = births[dimsort]
+    deaths = deaths[dimsort]
+    dims = dims[dimsort]
 
-    plt.suptitle(f't = {t[tind]*1e3} ms')
+    # Find the first instance of dimension 1
+    ind = np.searchsorted(dims, 1)
+    # Split the data into dimension 0 and dimension 1
+    p0 = births[:ind], deaths[:ind]
+    p1 = births[ind:], deaths[ind:]
 
-    gudhi.plot_persistence_diagram(p_lower_norm, axes=axs[0])
-    gudhi.plot_persistence_diagram(p_upper_norm, axes=axs[1])
-    axs[0].set_title('Sub level set persistence')
-    axs[1].set_title('Super level set persistence')
+    # Return the data
+    return p0, p1
 
-    plt.savefig(f'./outputs/phase_space_tda/persistence_diagram_{tind}.png', dpi=300)
+def plot_persistence_diagram(tind, p_all):
+    pp_lower = []
+    pn_lower = []
+    pp_upper = []
+    pn_upper = []
+
+    for p_list in p_all:
+        pp_lower.append(p_list[0])
+        pn_lower.append(p_list[1])
+        pp_upper.append(p_list[2])
+        pn_upper.append(p_list[3])
+
+    p0_lower, p1_lower = compact_persistence(pp_lower + pn_lower)
+    p0_upper, p1_upper = compact_persistence(pp_upper + pn_upper)
+
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=100)
+
+    ax.set_aspect('equal', adjustable='box')
+
+    ax.scatter( p0_lower[0],  p0_lower[1], c='C0', s=((p0_lower[1]-p0_lower[0])*3e-7)**2, alpha=0.5)
+    ax.scatter( p1_lower[0],  p1_lower[1], c='C1', s=((p1_lower[1]-p1_lower[0])*3e-7)**2, alpha=0.5)
+    ax.scatter(-p0_upper[0], -p0_upper[1], c='C2', s=((p0_upper[1]-p0_upper[0])*3e-7)**2, alpha=0.5)
+    ax.scatter(-p1_upper[0], -p1_upper[1], c='C3', s=((p1_upper[1]-p1_upper[0])*3e-7)**2, alpha=0.5)
+
+    ax.plot([2.3e8, 3.3e8], [2.3e8, 3.3e8], color='k', linestyle='--')
+
+    ax.set_title(f'Persistence diagram at t = {t[tind]*1e3:.3f} ms')
+
+    ax.set_xlim(2.3e8, 3.3e8)
+    ax.set_ylim(2.3e8, 3.3e8)
+
+    plt.savefig(f'./outputs/phase_space_tda/persistence_diagram_{tind}.png', dpi=100)
+
+    plt.close(fig)
 
 def analyze_frame(tind):
     ## Get the right file to load
@@ -314,15 +363,17 @@ def analyze_frame(tind):
     pp = particle_motion.deut
     
     integrals = compute_initial_integrals(tind, 196, pp)
+    p_all = []
     with FileReader(f0_file) as f0_reader:
-        fp_physical, fn_physical, f_mask = compute_interpolated_distribution(tind, f0_reader, pp, integrals)
-
-    p_list = compute_normalized_persistences(fp_physical, fn_physical)
+        for nphi in range(16):
+            fp_physical, fn_physical, f_mask = compute_interpolated_distribution(tind, nphi, f0_reader, pp, integrals)
+            p_list = compute_all_persistences(fp_physical, fn_physical)
+            p_all.append(p_list)
 
     with open(f'./outputs/phase_space_tda/persistence_diagram_{tind}.pkl', 'wb') as f:
-        pickle.dump(p_list, f)
+        pickle.dump(p_all, f)
 
-    plot_persistence_diagram(tind, p_list)
+    plot_persistence_diagram(tind, p_all)
 
     print(f'Finished {tind}', flush=True)
 
