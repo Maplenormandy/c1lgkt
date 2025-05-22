@@ -88,8 +88,8 @@ def load_f3d(f3d_reader):
     e_den = f3d_reader.read('e_den', start=[0, 0], count=[132048, 16])
 
     # Set the electron density data to NaN for the flux surfaces outside the range
-    e_den[:geom.psi_surf[ksurf0],:] = np.nan
-    e_den[geom.psi_surf[ksurf1+1]:,:] = np.nan
+    e_den[:geom.breaks_surf[ksurf0],:] = np.nan
+    e_den[geom.breaks_surf[ksurf1+1]:,:] = np.nan
 
     return e_den
 
@@ -166,29 +166,34 @@ def plot_persistence_diagram(tind, p_all):
     p_upper = []
 
     for p_list in p_all:
-        p_lower.append(p_list[0])
-        p_upper.append(p_list[1])
+        p_lower.extend(p_list[0])
+        p_upper.extend(p_list[1])
 
     p0_lower, p1_lower = compact_persistence(p_lower)
     p0_upper, p1_upper = compact_persistence(p_upper)
 
-    fig, ax = plt.subplots(figsize=(6, 6), dpi=100)
+    fig, ax = plt.subplots(figsize=(6, 6))
 
     ax.set_aspect('equal', adjustable='box')
 
-    ax.scatter( p0_lower[0],  p0_lower[1], c='C0', s=((p0_lower[1]-p0_lower[0])*3e-7)**2, alpha=0.5)
-    ax.scatter( p1_lower[0],  p1_lower[1], c='C1', s=((p1_lower[1]-p1_lower[0])*3e-7)**2, alpha=0.5)
-    ax.scatter(-p0_upper[0], -p0_upper[1], c='C2', s=((p0_upper[1]-p0_upper[0])*3e-7)**2, alpha=0.5)
-    ax.scatter(-p1_upper[0], -p1_upper[1], c='C3', s=((p1_upper[1]-p1_upper[0])*3e-7)**2, alpha=0.5)
+    print('Plotting', flush=True)
+    print(len(p0_lower), len(p1_lower), len(p0_upper), len(p1_upper), flush=True)
 
-    #ax.plot([2.3e8, 3.3e8], [2.3e8, 3.3e8], color='k', linestyle='--')
+    ax.scatter( p0_lower[0],  p0_lower[1], c='C0', s=((p0_lower[1]-p0_lower[0])*5e-18)**2, alpha=0.5)
+    ax.scatter( p1_lower[0],  p1_lower[1], c='C1', s=((p1_lower[1]-p1_lower[0])*5e-18)**2, alpha=0.5)
+    ax.scatter(-p0_upper[0], -p0_upper[1], c='C2', s=((p0_upper[1]-p0_upper[0])*5e-18)**2, alpha=0.5)
+    ax.scatter(-p1_upper[0], -p1_upper[1], c='C3', s=((p1_upper[1]-p1_upper[0])*5e-18)**2, alpha=0.5)
+
+    ax.plot([3.3e19, 3.55e19], [3.3e19, 3.55e19], color='k', linestyle='--')
 
     ax.set_title(f'Persistence diagram at t = {t[tind]*1e3:.3f} ms')
 
-    #ax.set_xlim(2.3e8, 3.3e8)
-    #ax.set_ylim(2.3e8, 3.3e8)
+    ax.set_xlim(3.3e19, 3.55e19)
+    ax.set_ylim(3.3e19, 3.55e19)
 
-    plt.savefig(f'./outputs/f3d_tda/persistence_diagram_{tind}.png', dpi=100)
+    print('Saving', flush=True)
+
+    plt.savefig(f'./outputs/f3d_tda/persistence_diagram_{tind}.png')
 
     plt.close(fig)
 
@@ -203,7 +208,7 @@ def analyze_frame(tind):
         e_den = load_f3d(f3d_reader)
 
         for nphi in range(16):
-            p_list = compute_all_persistences(e_den)
+            p_list = compute_all_persistences(e_den[:,nphi])
             p_all.append(p_list)
 
     with open(f'./outputs/f3d_tda/persistence_diagram_{tind}.pkl', 'wb') as f:
@@ -224,19 +229,19 @@ if __name__ == '__main__':
     print(f'Using {n_procs} processes', flush=True)
 
 
-    tinds = np.arange(100, 500, 1, dtype=int)
+    tinds = np.arange(100, 500, 5, dtype=int)
 
     #tind = 350
     #with open(f'./outputs/phase_space_tda/persistence_diagram_{tind}.pkl', 'rb') as f:
     #    p_list = pickle.load(f)
     #plot_persistence_diagram(tind, p_list)
 
-    analyze_frame(350)
+    #analyze_frame(350)
 
     # Set up the multiprocessing pool
-    #with mp.Pool(processes=n_procs) as pool:
-    #    # Use the pool to process the files in parallel
-    #    results = pool.map(analyze_frame, tinds)
+    with mp.Pool(processes=n_procs) as pool:
+        # Use the pool to process the files in parallel
+        results = pool.map(analyze_frame, tinds)
 
     
 

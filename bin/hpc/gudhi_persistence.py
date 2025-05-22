@@ -76,15 +76,15 @@ t = xgcdata['t'][:]
 # %% Analysis presets
 
 
-#analysis = {
-#    'xi0': np.sqrt(0.67),
-#    'name': 'passing'
-#}
-
 analysis = {
-    'xi0': np.sqrt(0.33),
-    'name': 'trapped'
+    'xi0': np.sqrt(0.67),
+    'name': 'passing'
 }
+
+#analysis = {
+#    'xi0': np.sqrt(0.33),
+#    'name': 'trapped'
+#}
 
 # %% Define function to plot the data
 
@@ -132,7 +132,7 @@ def compute_initial_integrals(tind, ksurf, pp: particle_motion.ParticleParams):
 
     return rotating_frame, mu0, ham0, lphi0
 
-def compute_interpolated_distribution(tind, nphi, f0_reader: FileReader, pp: particle_motion.ParticleParams, integrals):
+def compute_interpolated_distribution(tind, kphi, f0_reader: FileReader, pp: particle_motion.ParticleParams, integrals):
     ## Unpack the integrals
     rotating_frame, mu0, ham0, lphi0 = integrals
     t0 = rotating_frame.t0
@@ -170,16 +170,16 @@ def compute_interpolated_distribution(tind, nphi, f0_reader: FileReader, pp: par
     n1 = geom.breaks_surf[ksurf1+1]
 
     #print('Loading data', flush=True)
-    start_time = time.perf_counter()
+    
 
     # Load the distribution function data
-    f_xgc = np.squeeze(f0_reader.read('i_f', start=[nphi, 0, n0, 0], count=[1, nmu, n1-n0, nvp]))
+    f_xgc = np.squeeze(f0_reader.read('i_f', start=[kphi, 0, n0, 0], count=[1, nmu, n1-n0, nvp]))
 
-    end_time = time.perf_counter()
+    
     #print(f'Loaded {n1-n0} nodes in {end_time-start_time:.2f} seconds', flush=True)
 
     # Get varphi of the toroidal plane; note that f0 is on half-integer planes starting at -1/2 (?)
-    varphi = 2*np.pi/48 * (nphi-0.5)
+    varphi = 2*np.pi/48 * (kphi-0.5)
 
     varphi_arr = np.ones(n1-n0) * varphi
     r_arr = geom.rz_node[n0:n1,0]
@@ -325,22 +325,22 @@ def plot_persistence_diagram(tind, p_all):
     pn_upper = []
 
     for p_list in p_all:
-        pp_lower.append(p_list[0])
-        pn_lower.append(p_list[1])
-        pp_upper.append(p_list[2])
-        pn_upper.append(p_list[3])
+        pp_lower.extend(p_list[0])
+        pn_lower.extend(p_list[1])
+        pp_upper.extend(p_list[2])
+        pn_upper.extend(p_list[3])
 
     p0_lower, p1_lower = compact_persistence(pp_lower + pn_lower)
     p0_upper, p1_upper = compact_persistence(pp_upper + pn_upper)
 
-    fig, ax = plt.subplots(figsize=(6, 6), dpi=100)
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=300)
 
     ax.set_aspect('equal', adjustable='box')
 
-    ax.scatter( p0_lower[0],  p0_lower[1], c='C0', s=((p0_lower[1]-p0_lower[0])*3e-7)**2, alpha=0.5)
-    ax.scatter( p1_lower[0],  p1_lower[1], c='C1', s=((p1_lower[1]-p1_lower[0])*3e-7)**2, alpha=0.5)
-    ax.scatter(-p0_upper[0], -p0_upper[1], c='C2', s=((p0_upper[1]-p0_upper[0])*3e-7)**2, alpha=0.5)
-    ax.scatter(-p1_upper[0], -p1_upper[1], c='C3', s=((p1_upper[1]-p1_upper[0])*3e-7)**2, alpha=0.5)
+    ax.scatter( p0_lower[0],  p0_lower[1], c='C0', s=((p0_lower[1]-p0_lower[0])*3e-7)**2, alpha=0.2)
+    ax.scatter( p1_lower[0],  p1_lower[1], c='C1', s=((p1_lower[1]-p1_lower[0])*3e-7)**2, alpha=0.2)
+    ax.scatter(-p0_upper[0], -p0_upper[1], c='C2', s=((p0_upper[1]-p0_upper[0])*3e-7)**2, alpha=0.2)
+    ax.scatter(-p1_upper[0], -p1_upper[1], c='C3', s=((p1_upper[1]-p1_upper[0])*3e-7)**2, alpha=0.2)
 
     ax.plot([2.3e8, 3.3e8], [2.3e8, 3.3e8], color='k', linestyle='--')
 
@@ -349,7 +349,12 @@ def plot_persistence_diagram(tind, p_all):
     ax.set_xlim(2.3e8, 3.3e8)
     ax.set_ylim(2.3e8, 3.3e8)
 
-    plt.savefig(f'./outputs/phase_space_tda/persistence_diagram_{tind}.png', dpi=100)
+    ax.set_xlabel('Birth')
+    ax.set_ylabel('Death')
+
+    plt.tight_layout()
+
+    plt.savefig(f'./outputs/phase_space_{analysis['name']}_tda/persistence_diagram_{tind}.png', dpi=300)
 
     plt.close(fig)
 
@@ -365,12 +370,15 @@ def analyze_frame(tind):
     integrals = compute_initial_integrals(tind, 196, pp)
     p_all = []
     with FileReader(f0_file) as f0_reader:
-        for nphi in range(16):
-            fp_physical, fn_physical, f_mask = compute_interpolated_distribution(tind, nphi, f0_reader, pp, integrals)
+        for kphi in range(16):
+            start_time = time.perf_counter()
+            fp_physical, fn_physical, f_mask = compute_interpolated_distribution(tind, kphi, f0_reader, pp, integrals)
             p_list = compute_all_persistences(fp_physical, fn_physical)
             p_all.append(p_list)
+            end_time = time.perf_counter()
+            print(f'Finished tind {tind} kphi {kphi} in {end_time-start_time:.2f} seconds', flush=True)
 
-    with open(f'./outputs/phase_space_tda/persistence_diagram_{tind}.pkl', 'wb') as f:
+    with open(f'./outputs/phase_space_{analysis['name']}_tda/persistence_diagram_{tind}.pkl', 'wb') as f:
         pickle.dump(p_all, f)
 
     plot_persistence_diagram(tind, p_all)
@@ -393,8 +401,8 @@ if __name__ == '__main__':
 
     #tind = 350
     #with open(f'./outputs/phase_space_tda/persistence_diagram_{tind}.pkl', 'rb') as f:
-    #    p_list = pickle.load(f)
-    #plot_persistence_diagram(tind, p_list)
+    #    p_all = pickle.load(f)
+    #plot_persistence_diagram(tind, p_all)
 
     #analyze_frame(350)
 
