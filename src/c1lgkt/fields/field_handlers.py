@@ -2,7 +2,11 @@
 """
 @author: maple
 
-This file defines the abstract FieldHandler class, and gives some implementations
+This file defines the abstract FieldHandler class, and gives some implementations.
+
+FieldHandlers are responsible for holding and manipulating the field data, in particular
+providing converting from physical units into the proper data necessary for interpolation.
+Note that the interpolation itself is performed by functions in field_interpolators.py.
 """
 
 import numpy as np
@@ -420,20 +424,6 @@ class GaussHermiteFunction(BallooningModeInterpolator):
         # Sets the gyroaverage interpolator to None
         self.j_interp : BicubicInterpolator | None = None
         
-        # Old code: uses np.polynomial.hermite.hermval2d, which may be slow
-        '''
-        # Compute derivatives of the Hermite coefficients
-        dcoefs0 = np.polynomial.hermite.hermder(coefs, axis=0)
-        dcoefs1 = np.polynomial.hermite.hermder(coefs, axis=1)
-
-        if dcoefs0.shape[0] != coefs.shape[0]:
-            dcoefs0 = np.concatenate((dcoefs0, np.zeros((1, coefs.shape[1]))), axis=0)
-        if dcoefs1.shape[1] != coefs.shape[1]:
-            dcoefs1 = np.concatenate((dcoefs1, np.zeros((coefs.shape[0], 1))), axis=1)
-
-        # Stack the coefficients together on the last axis
-        self.coefs = np.stack((coefs, dcoefs0, dcoefs1), axis=-1)'
-        '''
 
     def __call__(self, q, eta, gradient=True):
         mu_q, mu_eta, sigma_q, sigma_eta = self.params
@@ -492,6 +482,12 @@ class GaussHermiteFunction(BallooningModeInterpolator):
                 return p * g * j0
     
     def get_theta0(self):
+        """
+        Get theta0, which gives the overall phase factor (i.e. <k_parallel>) for the mode.
+        Note this term shows up in the eikonal phase factor, so it can't be computed within
+        the __call__ method.
+        """
+
         ## Return mu_eta as the value of theta0
         return self.params[1]
 
@@ -546,10 +542,11 @@ class GaussHermiteFieldHandler(FieldHandler):
         eq = geom.eq
         
         # Range of psi surfaces over which to compute the gyroaveraging interpolation function
-        ksurf0, ksurf1 = 1, geom.nsurf
+        # TODO: Make this a parameter
+        ksurf0, ksurf1 = 45, 237
 
         ## First, resample each flux surface into a regular grid in eta
-        eta_samp = np.linspace(-3*np.pi, 3*np.pi, 256*3+1, endpoint=True)
+        eta_samp = np.linspace(-3.5*np.pi, 3.5*np.pi, 256*4+1, endpoint=True)
         j0_samp = np.empty((ksurf1-ksurf0, len(eta_samp)))
 
         for ksurf in range(ksurf0, ksurf1):
@@ -607,9 +604,18 @@ class GaussHermiteFieldHandler(FieldHandler):
 
         for j in range(len(eta_samp)):
             j0_interp = scipy.interpolate.CubicSpline(-geom.interp_q(geom.psi_surf[ksurf0:ksurf1]), j0_samp[:,j])
-            j0_grid[:,j] = j0_interp(q_samp)
+            j0_grid[:,j] = j0_interp(-q_samp)
 
         # Now we can compute the gyroaveraging interpolation function
         j_interp = BicubicInterpolator(j0_grid, ([np.min(q_samp), np.max(q_samp)], [np.min(eta_samp), np.max(eta_samp)]), bc_type=['natural', 'natural'])
         return j_interp
 
+    def set_j_params(self, mu0: float, pm: float, pz: float):
+        """
+        Sets up gyroaveraging for the Gauss-Hermite modes.
+        """
+        # For each mode, assemble the gyroaveraging interpolator and store it in each mode
+        for n, mode in self.modes:
+            # Compute the gyroaveraging interpolator
+            j_interp = self.assemble_j_interp(n, mu0, pm, pz)
+            mode.set_j_interp(j_interp)

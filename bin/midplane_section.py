@@ -26,14 +26,14 @@ import os
 
 # %% Load the XGC data
 
-eq = Equilibrium.from_eqdfile(R'D:\Documents\IFS\hmode_jet\D3D141451.eqd')
+eq = Equilibrium.from_eqdfile(R'F:\Documents\IFS\hmode_jet\D3D141451.eqd')
 
-xgcdata = Dataset(R'D:\Documents\Globus\XGC1.nc')
+xgcdata = Dataset(R'F:\Documents\Globus\XGC1.nc')
 
 geom_files = {
-    'ele_filename': R'D:\Documents\IFS\hmode_jet\Seo.eqd.ele',
-    'fdmat_filename': R'D:\Documents\IFS\hmode_jet\fdmat.pkl',
-    'min_e_filename': R'D:\Documents\IFS\hmode_jet\min_E_mat.pkl'
+    'ele_filename': R'F:\Documents\IFS\hmode_jet\Seo.eqd.ele',
+    'fdmat_filename': R'F:\Documents\IFS\hmode_jet\fdmat.pkl',
+    'min_e_filename': R'F:\Documents\IFS\hmode_jet\min_E_mat.pkl'
 }
 geom = XgcGeomHandler(eq, xgcdata, **geom_files)
 
@@ -42,7 +42,7 @@ uph = np.load('./outputs/phase_vel.npz')['u_lstsq']
 # %% Set up the ballooning interpolator
 
 # Set up zonal interpolation function
-tind = 401
+tind = 400
 zpot = xgcdata['pot00'][tind,:]
 zpot_psi = xgcdata['psi00'][:]
 interp_zpot = scipy.interpolate.CubicSpline(zpot_psi, zpot, extrapolate=True)
@@ -53,23 +53,26 @@ fit_results = np.load('./outputs/fit_results.npz', allow_pickle=True)
 params_g, params_gh = fit_results['params_g'], fit_results['params_gh']
 
 # Set up the interpolator
-mode = GaussHermiteFunction(params_g[:4], params_gh*0.75)
+mode = GaussHermiteFunction(params_g[:4], params_gh*0.5)
 interp_balloon = [(39, mode)]
 
 ballFields = GaussHermiteFieldHandler(geom, interp_zpot, interp_balloon)
 
 # %% Set up initial conditions
 
-filelabel = 'midplane_deut_trapped_r75'
+filelabel = 'midplane_deut_trapped_r50'
 
 print('currently running: ' + filelabel)
 
 
 ## Set up the rotating frame
 # NOTE: Be careful about unit conventions, XGC is in sec while we work in millisec
-tind0 = 401 #424, 386
+tind0 = tind
 
-omega_frame = -uph[tind0,196]*geom.q_surf[196]*1e-3
+ksurf0 = np.argmin(-uph[tind0,180:220]*geom.q_surf[180:220])+180
+print('ksurf0 = {}'.format(ksurf0))
+
+omega_frame = -uph[tind0,ksurf0]*geom.q_surf[ksurf0]*1e-3
 rotating_frame = particle_motion.RotatingFrameInfo(0, omega_frame, tind0)
 t0 = rotating_frame.t0
 
@@ -78,7 +81,7 @@ pp = particle_motion.deut
 
 ## Set initial position
 #r0 = 2.2259
-r0 = eq.interp_router(geom.psi_surf[196]/eq.psix)
+r0 = eq.interp_router(geom.psi_surf[ksurf0]/eq.psix)
 z0 = geom.zaxis
 x0 = np.array([r0, 0.0, z0])
 
@@ -102,9 +105,9 @@ vll0 = vll_mean + pp.vt * xi0 * np.sqrt(ev0)
 # Initial magnetic moment
 mu0 = pp.m * (1-xi0**2) * (pp.vt * np.sqrt(ev0))**2 / 2 / modb
 
-
+# Set up the gyroaveraging and assign the fields
+ballFields.set_j_params(mu0, pp.m, pp.z)
 fields = ballFields
-
 
 # Compute integrals
 ham, lphi = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, mu0])), eq, pp, fields, rotating_frame)
@@ -113,7 +116,7 @@ ham, lphi = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, m
 nump = 48
 #nump = 1
 varphi_start = np.linspace(0,2*np.pi/39, num=nump, endpoint=False)
-r_start = np.linspace(r0-0.01, r0+0.01, num=nump)
+r_start = np.linspace(r0-0.005, r0+0.005, num=nump)
 
 initial_conditions = np.empty(5*nump)
 
@@ -136,7 +139,7 @@ for k in range(nump):
 
 # %% RK4 solve
 
-output_dir = 'D:/Documents/IFS/hmode_jet/outputs/'
+output_dir = 'F:/Documents/IFS/hmode_jet/outputs/'
 
 if 'trapped' in filelabel:
     tmult = 5

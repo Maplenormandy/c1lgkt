@@ -253,16 +253,16 @@ class Equilibrium:
         return cls(**eq_kwargs)
     '''
     
-    def plot_magnetic_geometry(self, ax, monochrome=True):
+    def plot_magnetic_geometry(self, ax, monochrome=True, alpha=1.0):
         eq = self
         
         if monochrome:
-            ax.contour(eq.rgrid, eq.zgrid, eq.psirz, levels=64, colors=['tab:gray'], linewidths=mpl.rcParams['lines.linewidth']*0.5)
+            ax.contour(eq.rgrid, eq.zgrid, eq.psirz, levels=64, colors=['tab:gray'], linewidths=mpl.rcParams['lines.linewidth']*0.5, alpha=alpha)
             ax.plot(eq.wallrz[:,0], eq.wallrz[:,1], c='k')
             ax.plot(eq.lcfsrz[:,0], eq.lcfsrz[:,1], c='k')
             ax.set_aspect('equal')
         else:
-            ax.contour(eq.rgrid, eq.zgrid, eq.psirz, levels=64, linewidths=mpl.rcParams['lines.linewidth']*0.5)
+            ax.contour(eq.rgrid, eq.zgrid, eq.psirz, levels=64, linewidths=mpl.rcParams['lines.linewidth']*0.5, alpha=alpha)
             ax.plot(eq.wallrz[:,0], eq.wallrz[:,1])
             ax.plot(eq.lcfsrz[:,0], eq.lcfsrz[:,1])
             ax.set_aspect('equal')

@@ -549,6 +549,10 @@ class XgcGeomHandler:
 
         data_surfnode[0] = 0
 
+        ## This array stores the weights for the flux surface average at the nodes
+        self.surf_weight = np.zeros(self.nnode_surf)
+        self.surf_weight[0] = 1
+
         for k in range(self.nsurf):
             # Simplify notation for indexing into the array of nodes
             surfslice = np.index_exp[self.breaks_surf[k]:self.breaks_surf[k+1]]
@@ -564,6 +568,7 @@ class XgcGeomHandler:
             rowind_surfavg[surfslice] = k
             colind_surfavg[surfslice] = np.arange(self.breaks_surf[k], self.breaks_surf[k+1], dtype=int)
             data_surfavg[surfslice] = (2*np.pi*dl / bp[surfslice]) / (self.dvol_surf[k])
+            self.surf_weight[surfslice] = (2*np.pi*dl / bp[surfslice]) / (self.dvol_surf[k])
 
             rowind_surfnode[surfslice] = np.arange(self.breaks_surf[k], self.breaks_surf[k+1], dtype=int)
             colind_surfnode[surfslice] = k
@@ -573,6 +578,8 @@ class XgcGeomHandler:
 
         # This matrix takes a flux surface average and returns the value at the nodes
         self.surf_to_node = scipy.sparse.csr_array((data_surfnode, (rowind_surfnode, colind_surfnode)), shape=(self.nnode,self.nsurf))
+
+        
     
     def flux_surf_avg(self, f, nodal=False):
         """
@@ -733,3 +740,5 @@ class XgcGeomHandler:
         jmat = scipy.sparse.csr_array((data_jmat, (rowind_jmat, colind_jmat)))
 
         return jmat
+
+# %%
