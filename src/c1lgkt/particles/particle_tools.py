@@ -59,7 +59,7 @@ def compute_integrals_dk(t, ysol, eq: Equilibrium, pp: ParticleParams, fields: F
     else:
         return ham, lphi
 
-def compute_frequencies(t, r, z, varphi, eq: Equilibrium):
+def compute_frequencies(t, r, z, varphi, eq: Equilibrium, frame: None | RotatingFrameInfo = None):
     """
     Compute frequencies as well as various winding numbers
     z, r, varphi should be arrays of shape [nt]
@@ -74,7 +74,10 @@ def compute_frequencies(t, r, z, varphi, eq: Equilibrium):
     j_orientation = int(np.sign(np.sum(r*np.roll(z,-1)) - np.sum(z*np.roll(r,-1))))
     
     omega_pol = 2*np.pi / (t[-1] - t[0]) * j_orientation
-    omega_tor = (varphi[-1] - varphi[0]) / (t[-1] - t[0])
+    if frame is None:
+        omega_tor = (varphi[-1] - varphi[0]) / (t[-1] - t[0])
+    else:
+        omega_tor = (varphi[-1] - varphi[0] - frame.omega_rotation * (t[-1] - t[0])) / (t[-1] - t[0])
     
     # q_kinetic = omeg_tor / omeg_pol
     return omega_tor, omega_pol, j_axis
