@@ -2,7 +2,7 @@
 """
 @author: maple
 
-Code to compute some Poincare sections
+Code to compute some Poincare sections. This one starts a blob of initial conditions
 """
 
 import numpy as np
@@ -57,7 +57,7 @@ params_g, params_gh = fit_results['params_g'], fit_results['params_gh']
 
 # %% Set up initial conditions
 
-filelabel = 'midplane_deut_passing_r100'
+filelabel = 'midplane_blob_deut_trapped_r100'
 
 print('currently running: ' + filelabel)
 
@@ -101,8 +101,8 @@ vll_mean = eq.interp_ff(psi0) * omega0 / modb
 
 # Particle kinetic energy in keV and cos(pitch angle)
 ev0 = 0.78
-#xi0 = np.sqrt(0.33)
-xi0 = np.sqrt(0.67)
+xi0 = np.sqrt(0.33)
+#xi0 = np.sqrt(0.67)
 # Set the initial parallel velocity
 vll0 = vll_mean + pp.vt * xi0 * np.sqrt(ev0)
 # Initial magnetic moment
@@ -116,25 +116,35 @@ fields = ballFields
 ham, lphi = particle_tools.compute_integrals_dk(t0, np.concatenate((x0, [vll0, mu0])), eq, pp, fields, rotating_frame)
 
 ## Compute a set of initial conditions
-nump = 48
+nump = 192
 #nump = 1
-varphi_start = np.linspace(0,2*np.pi/39, num=nump, endpoint=False)
-r_start = np.linspace(r0-0.005, r0+0.005, num=nump)
+
+# Get a random number generator with a fixed seed for reproducibility
+rng = np.random.default_rng(42)
+
+
+
+#varphi_start = 0.0 + rng.normal(0, 0.0005, size=(nump,))
+varphi0 = 0.0
+r_start = r0-0.005 + rng.normal(0, 0.002, size=(nump,))
+z_start = z0 + rng.normal(0, 0.002, size=(nump,))
+#varphi_start = np.linspace(0,2*np.pi/39, num=nump, endpoint=False)
+#r_start = np.linspace(r0-0.005, r0+0.005, num=nump)
 
 initial_conditions = np.empty(5*nump)
 
 for k in range(nump):
-    kll, pll_mean = particle_tools.compute_parallel_energy(t0, r_start[k], z0, varphi_start[k], mu0, ham, lphi, eq, pp, fields, rotating_frame)
+    kll, pll_mean = particle_tools.compute_parallel_energy(t0, r_start[k], z_start[k], varphi0, mu0, ham, lphi, eq, pp, fields, rotating_frame)
 
     if kll < 0:
         print("Warning: k={} has negative kinetic energy. Taking equal to zero".format(k))
         kll = 0
 
-    vll = (pll_mean + np.choose(k%2, [1,-1]) * np.sqrt(2 * pp.m * kll)) / pp.m
+    vll = (pll_mean - 1 * np.sqrt(2 * pp.m * kll)) / pp.m
 
     initial_conditions[k + 0*nump] = r_start[k]
-    initial_conditions[k + 1*nump] = varphi_start[k]
-    initial_conditions[k + 2*nump] = z0
+    initial_conditions[k + 1*nump] = varphi0
+    initial_conditions[k + 2*nump] = z_start[k]
     initial_conditions[k + 3*nump] = vll
     initial_conditions[k + 4*nump] = mu0
 
@@ -145,9 +155,9 @@ for k in range(nump):
 output_dir = drive_letter + '/Documents/IFS/hmode_jet/outputs/'
 
 if 'trapped' in filelabel:
-    tmult = 5
+    tmult = 1
 else:
-    tmult = 5
+    tmult = 1
 
 dt_xgc = (xgcdata['t'][tind0+1] - xgcdata['t'][tind0])*1e3
 if pp.z > 0:
