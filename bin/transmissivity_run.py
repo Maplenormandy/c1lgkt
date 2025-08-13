@@ -211,7 +211,7 @@ else:
 # Number of steps before doing a checkpoint
 ncheckpoint = 80
 
-for kmu in range(nmu):
+for kmu in [nmu-1]:
     # Initialize the values
     rk4_y_check = np.empty((5*nump,ncheckpoint))
     rk4_dy_check = np.empty((5*nump,ncheckpoint))

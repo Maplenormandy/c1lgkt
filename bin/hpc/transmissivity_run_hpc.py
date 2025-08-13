@@ -252,10 +252,10 @@ def run_transmissivity(kmu):
 
 
     ## RK4 timestepper
-    #pbar = tqdm(range(nstep), dynamic_ncols=True)
+    pbar = tqdm(range(nstep), dynamic_ncols=True)
     num_sol = nump
-    #pbar.set_description("kmu: {}, num_sol: {}".format(kmu, num_sol))
-    for k in range(nstep):
+    pbar.set_description("kmu {}".format(kmu))
+    for k in pbar:
         y0 = rk4_y
         tk = t_span[0] + dt*k
 

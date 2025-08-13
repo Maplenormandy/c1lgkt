@@ -56,7 +56,7 @@ def sum_balloon_mode(
     
         return phi
 
-def compute_balloon_interpolation(
+def compute_balloon_interpolation_inside(
         tfrac, r, z, varphi,
         psi_ev,
         eq: Equilibrium,
@@ -64,6 +64,9 @@ def compute_balloon_interpolation(
         interp_balloon: list[BallooningInterpBundle],
         gradient: bool = True
         ):
+    """
+    This function actually computes the ballooning interpolation inside the LCFS.
+    """
     ## Unpack some parameters
     nump = len(r)
     (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
@@ -144,6 +147,55 @@ def compute_balloon_interpolation(
                 tor_eik = np.exp(1j*ntor*varphi)
                 phi += 2*np.real(sum_balloon_mode(q, theta, 1, ntor, mode, gradient=False) * tfrac * tor_eik)
         
+        return phi
+
+def compute_balloon_interpolation(
+        tfrac, r, z, varphi,
+        psi_ev,
+        eq: Equilibrium,
+        geom: XgcGeomHandler,
+        interp_balloon: list[BallooningInterpBundle],
+        gradient: bool = True
+        ):
+    """
+    This is a thin wrapper which checks if a particle is inside the LCFS; then passes the
+    particles that are inside to the actual interpolation function
+    """
+    ## Unpack some parameters
+    nump = len(r)
+    (psi, psidr, psidz, psidrr, psidrz, psidzz) = psi_ev
+
+    # Detect if a particle far enough inside the LCFS for the ballooning mode.
+    # Note that the straight field line coordinates aren't computed all the way
+    # to the LCFS!
+    inside_lcfs = np.logical_and(psi < geom.psi_surf[239], z > eq.zx)
+    
+
+    if gradient:
+        dphi = np.zeros((3, nump))
+
+        dphi_inside = compute_balloon_interpolation_inside(
+            tfrac, r[inside_lcfs], z[inside_lcfs], varphi[inside_lcfs],
+            (psi[inside_lcfs], psidr[inside_lcfs], psidz[inside_lcfs],
+             psidrr[inside_lcfs], psidrz[inside_lcfs], psidzz[inside_lcfs]),
+            eq, geom, interp_balloon, gradient=True
+        )
+
+        dphi[:, inside_lcfs] = dphi_inside
+
+        return dphi
+    else:
+        phi = np.zeros(nump)
+
+        phi_inside = compute_balloon_interpolation_inside(
+            tfrac, r[inside_lcfs], z[inside_lcfs], varphi[inside_lcfs],
+            (psi[inside_lcfs], psidr[inside_lcfs], psidz[inside_lcfs],
+             psidrr[inside_lcfs], psidrz[inside_lcfs], psidzz[inside_lcfs]),
+            eq, geom, interp_balloon, gradient=False
+        )
+
+        phi[inside_lcfs] = phi_inside
+
         return phi
 
 # %% Functions for computing poloidal punctures, used for computing interpolation on the mesh
